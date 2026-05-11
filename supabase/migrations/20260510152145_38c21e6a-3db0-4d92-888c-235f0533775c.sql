@@ -1,0 +1,1 @@
+ALTER TYPE public.falta_periodo ADD VALUE IF NOT EXISTS 'Noite';

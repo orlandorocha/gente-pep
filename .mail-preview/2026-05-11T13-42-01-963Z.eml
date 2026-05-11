@@ -1,0 +1,21 @@
+From: SIGP <odouglasrocha@gmail.com>
+To: orlando.rocha@pepsico.com
+Subject: =?UTF-8?Q?SIGP_=E2=80=94_Teste_de_SMTP?=
+Message-ID: <3aace5f3-dcd9-0825-fdb5-7d83ef3e5a1e@gmail.com>
+Date: Mon, 11 May 2026 13:42:01 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="--_NmP-e914b1987ca98ef2-Part_1"
+
+----_NmP-e914b1987ca98ef2-Part_1
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Teste de envio do SIGP. Se voc=C3=AA recebeu, o SMTP est=C3=A1 OK.
+----_NmP-e914b1987ca98ef2-Part_1
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<p>Teste de envio do SIGP via <b>SIGP <odouglasrocha@gmail.com></b>. Se =
+voc=C3=AA recebeu, o SMTP est=C3=A1 OK.</p>
+----_NmP-e914b1987ca98ef2-Part_1--

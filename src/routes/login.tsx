@@ -1,0 +1,151 @@
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+import { ShieldCheck, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent } from "@/components/ui/card";
+import { ensureAuthSessionReady, supabase } from "@/integrations/custom-supabase/client";
+import { toast } from "sonner";
+
+export const Route = createFileRoute("/login")({
+  beforeLoad: async () => {
+    if (typeof window === "undefined") return;
+    await ensureAuthSessionReady();
+    const { data } = await supabase.auth.getSession();
+    if (data.session) throw redirect({ to: "/dashboard" });
+  },
+  component: LoginPage,
+});
+
+function LoginPage() {
+  const navigate = useNavigate();
+  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [gpid, setGpid] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      if (mode === "signup") {
+        const { error } = await supabase.auth.signUp({
+          email, password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/dashboard`,
+            data: { gpid },
+          },
+        });
+        if (error) throw error;
+        toast.success("Conta criada! Verifique seu e-mail para confirmar.");
+        setMode("login");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        toast.success("Bem-vindo ao Guardião de Gente");
+        navigate({ to: "/dashboard" });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro inesperado";
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="grid min-h-screen lg:grid-cols-2">
+      <div
+        className="hidden flex-col justify-between p-12 text-primary-foreground lg:flex"
+        style={{ background: "var(--gradient-primary)" }}
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/15 backdrop-blur">
+            <ShieldCheck className="h-6 w-6" />
+          </div>
+          <span className="text-lg font-semibold">Guardião de Gente</span>
+        </div>
+        <div className="space-y-4">
+          <h1 className="text-4xl font-semibold leading-tight">
+            Gestão de pessoas, em um só lugar.
+          </h1>
+          <p className="max-w-md text-base text-primary-foreground/85">
+            Acompanhe absenteísmo, férias, licenças e tarefas operacionais com a clareza
+            que liderança e RH precisam.
+          </p>
+        </div>
+        <div className="text-xs text-primary-foreground/70">
+          Plataforma interna · Acesso restrito a colaboradores autorizados
+        </div>
+      </div>
+
+      <div className="flex items-center justify-center bg-background p-6 md:p-12">
+        <Card className="w-full max-w-md border-none shadow-none">
+          <CardContent className="p-0">
+            <div className="mb-8">
+              <h2 className="text-2xl font-semibold tracking-tight">
+                {mode === "login" ? "Acesso corporativo" : "Criar acesso"}
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {mode === "login"
+                  ? "Entre com seu e-mail corporativo e senha."
+                  : "Cadastre-se com seu e-mail e GPID."}
+              </p>
+            </div>
+
+            <form onSubmit={submit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">E-mail corporativo</Label>
+                <Input
+                  id="email" type="email" required value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="nome@empresa.com"
+                />
+              </div>
+
+              {mode === "signup" && (
+                <div className="space-y-2">
+                  <Label htmlFor="gpid">GPID / Matrícula</Label>
+                  <Input
+                    id="gpid" required value={gpid}
+                    onChange={(e) => setGpid(e.target.value)}
+                    placeholder="GP10234"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Senha</Label>
+                <Input
+                  id="password" type="password" required minLength={6}
+                  value={password} onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                />
+              </div>
+
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {mode === "login" ? "Entrar" : "Criar conta"}
+              </Button>
+            </form>
+
+            <div className="mt-6 flex items-center justify-between text-sm">
+              <button
+                type="button"
+                onClick={() => setMode(mode === "login" ? "signup" : "login")}
+                className="text-primary hover:underline"
+              >
+                {mode === "login" ? "Criar acesso" : "Já tenho conta"}
+              </button>
+              <Link to="/recuperar" className="text-muted-foreground hover:text-foreground">
+                Recuperar acesso
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

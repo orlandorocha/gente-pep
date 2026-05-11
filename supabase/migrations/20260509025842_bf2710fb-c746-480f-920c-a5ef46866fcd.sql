@@ -1,0 +1,1 @@
+ALTER TABLE public.faltas ALTER COLUMN motivo TYPE text USING motivo::text;
