@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,12 +24,53 @@ export const Route = createFileRoute("/_app/faltas")({ component: FaltasPage });
 
 type FaltaRow = { id: string; colaborador_id: string; data: string; motivo: string; periodo: string; observacao: string | null };
 
+function getOrigemInfo(observacao: string | null) {
+  if (!observacao?.startsWith("Registrado automaticamente")) {
+    return { label: "Manual", detail: observacao || "Lançamento manual" };
+  }
+
+  if (observacao.includes("Em gozo")) {
+    return { label: "Automático", detail: "Férias" };
+  }
+
+  if (observacao.includes("Licença")) {
+    return { label: "Automático", detail: "Licença" };
+  }
+
+  if (observacao.includes("Agendamento")) {
+    return { label: "Automático", detail: "Agendamento" };
+  }
+
+  return { label: "Automático", detail: "Rotina diária" };
+}
+
 function FaltasPage() {
   const { data: colabs } = useColaboradores();
   const { data: faltas, reload } = useTable<FaltaRow>("faltas", "data", false);
-  const colMap = new Map(colabs.map((c) => [c.id, c]));
+  const colMap = useMemo(() => new Map(colabs.map((c) => [c.id, c])), [colabs]);
   const [editing, setEditing] = useState<FaltaRow | null>(null);
-  const { paged, page, setPage, pageSize, setPageSize, total, totalPages } = usePagination(faltas, 10);
+  const [q, setQ] = useState("");
+
+  const filteredFaltas = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return faltas.filter((f) => {
+      const c = colMap.get(f.colaborador_id);
+      return !term || [
+        f.data,
+        c?.nome,
+        c?.gpid,
+        c?.area,
+        f.motivo,
+        f.periodo,
+        f.observacao,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(term);
+    });
+  }, [faltas, colMap, q]);
+
+  const { paged, page, setPage, pageSize, setPageSize, total, totalPages } = usePagination(filteredFaltas, 10);
 
   return (
     <div className="space-y-6">
@@ -48,30 +89,45 @@ function FaltasPage() {
         }
       />
       <Card className="p-4">
+        <div className="mb-4 min-w-[260px] space-y-2">
+          <Label>Buscar</Label>
+          <Input
+            placeholder="Buscar por colaborador, GPID, área, motivo..."
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
         <div className="overflow-hidden rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Data</TableHead><TableHead>Colaborador</TableHead>
-                <TableHead>Área</TableHead><TableHead>Motivo</TableHead><TableHead>Período</TableHead>
+                <TableHead>Área</TableHead><TableHead>Motivo</TableHead><TableHead>Origem</TableHead><TableHead>Período</TableHead>
                 <TableHead className="w-[100px] text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paged.map((f) => {
                 const c = colMap.get(f.colaborador_id);
+                const origem = getOrigemInfo(f.observacao);
                 return (
                   <TableRow key={f.id}>
                     <TableCell className="font-mono text-xs">{f.data}</TableCell>
                     <TableCell><div className="font-medium">{c?.nome}</div><div className="text-xs text-muted-foreground">{c?.gpid}</div></TableCell>
                     <TableCell>{c?.area}</TableCell>
                     <TableCell><Badge variant={f.motivo === "Falta" ? "destructive" : "secondary"}>{f.motivo}</Badge></TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <Badge variant={origem.label === "Automático" ? "outline" : "secondary"}>{origem.label}</Badge>
+                        <div className="text-xs text-muted-foreground">{origem.detail}</div>
+                      </div>
+                    </TableCell>
                     <TableCell>{f.periodo}</TableCell>
                     <TableCell><RowActions table="faltas" id={f.id} label="ausência" onChanged={reload} onEdit={() => setEditing(f)} /></TableCell>
                   </TableRow>
                 );
               })}
-              {faltas.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Nenhuma ausência registrada.</TableCell></TableRow>}
+              {filteredFaltas.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Nenhuma ausência encontrada.</TableCell></TableRow>}
             </TableBody>
           </Table>
         </div>

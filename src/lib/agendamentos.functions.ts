@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/custom-supabase/client.server";
+import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
+import { formatLocalDateISO } from "@/lib/utils";
 
 const TIPOS = ["De bem com a vida", "Aniversário", "Hora Extra"] as const;
 
@@ -50,5 +52,10 @@ export const criarAgendamento = createServerFn({ method: "POST" })
       .select("id")
       .single();
     if (error) throw new Error(error.message);
+
+    if (data.data === formatLocalDateISO()) {
+      await sincronizarFaltasDoDia();
+    }
+
     return { id: row.id };
   });

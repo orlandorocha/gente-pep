@@ -17,6 +17,8 @@ import { RowActions } from "@/components/RowActions";
 import { useColaboradores, useTable } from "@/hooks/useData";
 import { supabase } from "@/integrations/custom-supabase/client";
 import { solicitarFerias } from "@/lib/ferias.functions";
+import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
+import { formatLocalDateISO } from "@/lib/utils";
 import { toast } from "sonner";
 import { Check, X, CalendarRange } from "lucide-react";
 import { ExportFeriasButton, ImportFeriasButton } from "@/components/XlsxButtons";
@@ -32,10 +34,10 @@ type FeriasRow = {
 };
 
 // ---------- Helpers de data ----------
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => formatLocalDateISO();
 
 function parseISO(d: string) { return new Date(d + "T12:00:00"); }
-function toISO(d: Date) { return d.toISOString().slice(0, 10); }
+function toISO(d: Date) { return formatLocalDateISO(d); }
 function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 function addYears(d: Date, n: number) { const x = new Date(d); x.setFullYear(x.getFullYear() + n); return x; }
 function diffDays(a: Date, b: Date) {
@@ -64,6 +66,7 @@ function FeriasPage() {
   const [areaFilter, setAreaFilter] = useState("all");
   const [turnoFilter, setTurnoFilter] = useState("all");
   const [grupoEmGozoAberto, setGrupoEmGozoAberto] = useState<string | null>(null);
+  const sincronizar = useServerFn(sincronizarFaltasDoDia);
 
   // Auto-reagendamento ao detectar férias encerradas
   useEffect(() => {
@@ -118,9 +121,10 @@ function FeriasPage() {
       for (const v of emCurso) {
         await supabase.from("ferias").update({ status: "Em gozo" }).eq("id", v.id);
       }
+      await sincronizar();
       reload();
     })();
-  }, [ferias, reload]);
+  }, [ferias, reload, sincronizar]);
 
   const emGozo = useMemo(() => {
     const hoje = todayISO();
@@ -201,6 +205,7 @@ function FeriasPage() {
         .eq("id", id)
         .eq("status", "Pendente");
       if (error) throw error;
+      await sincronizar();
       toast.success(acao === "aprovar" ? "Férias aprovadas" : "Férias recusadas");
       reload();
     } catch (e) { toast.error((e as Error).message); }
@@ -371,6 +376,7 @@ function FeriasEditForm({ initial, onSaved }: { initial: FeriasRow; onSaved: () 
   const [pa, setPa] = useState(initial.periodo_aquisitivo);
   const [status, setStatus] = useState<FeriasRow["status"]>(initial.status);
   const [submitting, setSubmitting] = useState(false);
+  const sincronizar = useServerFn(sincronizarFaltasDoDia);
   const totalDias = useMemo(() => {
     if (!inicio || !fim || fim < inicio) return null;
     return diffDays(parseISO(fim), parseISO(inicio)) + 1;
@@ -388,6 +394,7 @@ function FeriasEditForm({ initial, onSaved }: { initial: FeriasRow; onSaved: () 
       }).eq("id", initial.id);
       setSubmitting(false);
       if (error) { toast.error(error.message); return; }
+      await sincronizar();
       toast.success("Férias atualizadas");
       onSaved();
     }}>

@@ -18,6 +18,8 @@ import { ExportAgendamentosButton, ImportAgendamentosButton } from "@/components
 import { useColaboradores, useTable } from "@/hooks/useData";
 import { supabase } from "@/integrations/custom-supabase/client";
 import { criarAgendamento } from "@/lib/agendamentos.functions";
+import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
+import { formatLocalDateISO } from "@/lib/utils";
 import { DataPagination, usePagination } from "@/components/DataPagination";
 import { toast } from "sonner";
 
@@ -158,6 +160,7 @@ function AgendamentoForm({ colabs, onSaved, initial }: { colabs: any[]; onSaved:
   const [obs, setObs] = useState(initial?.observacao ?? "");
   const [submitting, setSubmitting] = useState(false);
   const criar = useServerFn(criarAgendamento);
+  const sincronizar = useServerFn(sincronizarFaltasDoDia);
 
   return (
     <form className="space-y-4" onSubmit={async (e) => {
@@ -171,6 +174,9 @@ function AgendamentoForm({ colabs, onSaved, initial }: { colabs: any[]; onSaved:
             prioridade: prioridade as any, observacao: obs,
           }).eq("id", initial.id);
           if (error) throw new Error(error.message);
+          if (data === formatLocalDateISO() || initial.data === formatLocalDateISO()) {
+            await sincronizar();
+          }
           toast.success("Agendamento atualizado");
         } else {
           await criar({ data: { colaboradorId, tipo, titulo, data, hora, prioridade, observacao: obs } });
