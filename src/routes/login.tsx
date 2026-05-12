@@ -5,8 +5,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ensureAuthSessionReady, supabase } from "@/integrations/custom-supabase/client";
 import { toast } from "sonner";
+
+const ADMIN_ACCESS_EMAIL = import.meta.env.VITE_ADMIN_ACCESS_EMAIL?.trim().toLowerCase() ?? "";
 
 export const Route = createFileRoute("/login")({
   beforeLoad: async () => {
@@ -24,7 +34,30 @@ function LoginPage() {
   const [email, setEmail] = useState("");
   const [gpid, setGpid] = useState("");
   const [password, setPassword] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [createAccessOpen, setCreateAccessOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const openCreateAccess = () => {
+    setAdminEmail("");
+    setCreateAccessOpen(true);
+  };
+
+  const confirmAdminEmail = () => {
+    if (!ADMIN_ACCESS_EMAIL) {
+      toast.error("E-mail admin não configurado no ambiente.");
+      return;
+    }
+
+    if (adminEmail.trim().toLowerCase() !== ADMIN_ACCESS_EMAIL) {
+      toast.error("E-mail admin inválido.");
+      return;
+    }
+
+    setCreateAccessOpen(false);
+    setMode("signup");
+    toast.success("Validação concluída. Você já pode criar o acesso.");
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,7 +167,14 @@ function LoginPage() {
             <div className="mt-6 flex items-center justify-between text-sm">
               <button
                 type="button"
-                onClick={() => setMode(mode === "login" ? "signup" : "login")}
+                onClick={() => {
+                  if (mode === "login") {
+                    openCreateAccess();
+                    return;
+                  }
+
+                  setMode("login");
+                }}
                 className="text-primary hover:underline"
               >
                 {mode === "login" ? "Criar acesso" : "Já tenho conta"}
@@ -145,6 +185,37 @@ function LoginPage() {
             </div>
           </CardContent>
         </Card>
+
+        <Dialog open={createAccessOpen} onOpenChange={setCreateAccessOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Validar criação de acesso</DialogTitle>
+              <DialogDescription>
+                Informe o e-mail administrador para liberar o formulário de cadastro.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2">
+              <Label htmlFor="admin-email">E-mail admin</Label>
+              <Input
+                id="admin-email"
+                type="email"
+                value={adminEmail}
+                onChange={(e) => setAdminEmail(e.target.value)}
+                placeholder="admin@empresa.com"
+              />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCreateAccessOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="button" onClick={confirmAdminEmail}>
+                Confirmar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
