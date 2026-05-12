@@ -238,10 +238,24 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
       const rows = await readXlsxRows(file);
       const inserts: any[] = []; const erros: string[] = [];
       for (const [i, r] of rows.entries()) {
-        const inicio = toISODate(r.inicio ?? r.Início);
-        const fim = toISODate(r.fim ?? r.Fim);
-        const pa = String(r.periodo_aquisitivo ?? r["Período aquisitivo"] ?? "").trim();
-        const ref = String(r.colaborador_id ?? r.colaborador ?? r.Colaborador ?? "").trim();
+        const inicio = toISODate(r.inicio ?? r.Início ?? r.Inicio ?? r["Data início"] ?? r["Data inicio"]);
+        const fim = toISODate(r.fim ?? r.Fim ?? r["Data fim"]);
+        const pa = String(
+          r.periodo_aquisitivo
+          ?? r["Período aquisitivo"]
+          ?? r["Periodo aquisitivo"]
+          ?? r["PERIODO AQUISITIVO"]
+          ?? "",
+        ).trim();
+        const ref = String(
+          r.colaborador_id
+          ?? r.colaborador
+          ?? r.Colaborador
+          ?? r.gpid
+          ?? r.GPID
+          ?? r.Gpid
+          ?? "",
+        ).trim();
         if (!inicio || !fim || !pa) { erros.push(`Linha ${i + 2}: campos obrigatórios faltando`); continue; }
         const c = findColaborador(colabs, ref);
         if (!c) { erros.push(`Linha ${i + 2}: colaborador "${ref}" não encontrado`); continue; }

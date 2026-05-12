@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
+import { sincronizarFaltasDiaAtual } from "@/lib/sync.functions";
 
 function isAuthorized(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/api/public/hooks/sync-faltas")({
           });
         }
         try {
-          const result = await sincronizarFaltasDoDia();
+          const result = await sincronizarFaltasDiaAtual();
           return new Response(JSON.stringify({ ok: true, ...result }), {
             headers: { "Content-Type": "application/json" },
           });
@@ -41,7 +41,7 @@ export const Route = createFileRoute("/api/public/hooks/sync-faltas")({
             headers: { "Content-Type": "application/json" },
           });
         }
-        const result = await sincronizarFaltasDoDia();
+        const result = await sincronizarFaltasDiaAtual();
         return new Response(JSON.stringify({ ok: true, ...result }), {
           headers: { "Content-Type": "application/json" },
         });

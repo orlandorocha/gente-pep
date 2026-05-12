@@ -48,105 +48,107 @@ function bumpAquisitivo(pa: string) {
  *
  * Idempotente: o índice único (colaborador_id, data, motivo) impede duplicatas.
  */
+export async function sincronizarFaltasDiaAtual() {
+  const hoje = todayISO();
+  const summary = { promovidas: 0, concluidas: 0, reagendadas: 0, faltasFerias: 0, faltasLicenca: 0, faltasAgendamento: 0 };
+
+  // 1. Promove Aprovada → Em gozo
+  const { data: aprovadas } = await supabaseAdmin
+    .from("ferias").select("id")
+    .eq("status", "Aprovada").lte("inicio", hoje).gte("fim", hoje);
+  for (const v of aprovadas ?? []) {
+    await supabaseAdmin.from("ferias").update({ status: "Em gozo" }).eq("id", v.id);
+    summary.promovidas++;
+  }
+
+  // 2. Conclui férias encerradas e agenda o próximo ciclo
+  const { data: encerradas } = await supabaseAdmin
+    .from("ferias").select("id, colaborador_id, gestor_id, inicio, fim, periodo_aquisitivo, status")
+    .in("status", ["Em gozo", "Aprovada"]).lt("fim", hoje);
+  for (const v of encerradas ?? []) {
+    await supabaseAdmin.from("ferias").update({ status: "Concluída" }).eq("id", v.id);
+    summary.concluidas++;
+
+    const duracao = diffDays(parseISO(v.fim), parseISO(v.inicio));
+    const novoInicio = shiftToWeekday(addYears(parseISO(v.inicio), 1));
+    const novoFim = addDays(novoInicio, duracao);
+    const novoPeriodoAquisitivo = bumpAquisitivo(v.periodo_aquisitivo);
+
+    const { data: existente } = await supabaseAdmin
+      .from("ferias")
+      .select("id")
+      .eq("colaborador_id", v.colaborador_id)
+      .eq("inicio", toISO(novoInicio))
+      .eq("fim", toISO(novoFim))
+      .eq("periodo_aquisitivo", novoPeriodoAquisitivo)
+      .maybeSingle();
+
+    if (!existente) {
+      const { error: insertError } = await supabaseAdmin.from("ferias").insert({
+        colaborador_id: v.colaborador_id,
+        gestor_id: v.gestor_id,
+        inicio: toISO(novoInicio),
+        fim: toISO(novoFim),
+        periodo_aquisitivo: novoPeriodoAquisitivo,
+        status: "Pendente",
+      });
+      if (!insertError) summary.reagendadas++;
+    }
+  }
+
+  // 3. Faltas a partir de Férias em curso hoje.
+  // Inclui "Aprovada" para não depender apenas da promoção de status acontecer antes.
+  const { data: emGozo } = await supabaseAdmin
+    .from("ferias").select("colaborador_id")
+    .in("status", ["Em gozo", "Aprovada"]).lte("inicio", hoje).gte("fim", hoje);
+  for (const f of emGozo ?? []) {
+    const { error } = await supabaseAdmin.from("faltas").insert({
+      colaborador_id: f.colaborador_id, data: hoje,
+      motivo: MOTIVO_FERIAS, periodo: "Integral",
+      observacao: "Registrado automaticamente (Em gozo)",
+    });
+    if (!error) summary.faltasFerias++;
+  }
+
+  // 4. Faltas a partir de Licenças Ativas
+  const { data: licencas } = await supabaseAdmin
+    .from("licencas").select("colaborador_id, tipo")
+    .eq("status", "Ativa").lte("inicio", hoje).gte("fim", hoje);
+  for (const l of licencas ?? []) {
+    const motivo = motivoLicenca(l.tipo);
+    const { error } = await supabaseAdmin.from("faltas").insert({
+      colaborador_id: l.colaborador_id, data: hoje,
+      motivo, periodo: "Integral",
+      observacao: `Registrado automaticamente (Licença ${l.tipo})`,
+    });
+    if (!error) summary.faltasLicenca++;
+  }
+
+  // 5. Faltas a partir de Agendamentos do dia
+  const { data: agendamentos } = await supabaseAdmin
+    .from("agendamentos")
+    .select("colaborador_id, tipo, titulo, hora")
+    .eq("data", hoje)
+    .neq("status", "Cancelado");
+  for (const a of agendamentos ?? []) {
+    const motivo = motivoAgendamento(a.tipo);
+    const titulo = a.titulo?.trim();
+    const hora = a.hora?.slice(0, 5);
+    const detalhe = [titulo, hora].filter(Boolean).join(" às ");
+    const { error } = await supabaseAdmin.from("faltas").insert({
+      colaborador_id: a.colaborador_id,
+      data: hoje,
+      motivo,
+      periodo: "Integral",
+      observacao: detalhe
+        ? `Registrado automaticamente (Agendamento: ${detalhe})`
+        : `Registrado automaticamente (Agendamento: ${a.tipo})`,
+    });
+    if (!error) summary.faltasAgendamento++;
+  }
+
+  return summary;
+}
+
 export const sincronizarFaltasDoDia = createServerFn({ method: "POST" })
-  .handler(async () => {
-    const hoje = todayISO();
-    const summary = { promovidas: 0, concluidas: 0, reagendadas: 0, faltasFerias: 0, faltasLicenca: 0, faltasAgendamento: 0 };
-
-    // 1. Promove Aprovada → Em gozo
-    const { data: aprovadas } = await supabaseAdmin
-      .from("ferias").select("id")
-      .eq("status", "Aprovada").lte("inicio", hoje).gte("fim", hoje);
-    for (const v of aprovadas ?? []) {
-      await supabaseAdmin.from("ferias").update({ status: "Em gozo" }).eq("id", v.id);
-      summary.promovidas++;
-    }
-
-    // 2. Conclui férias encerradas e agenda o próximo ciclo
-    const { data: encerradas } = await supabaseAdmin
-      .from("ferias").select("id, colaborador_id, gestor_id, inicio, fim, periodo_aquisitivo, status")
-      .in("status", ["Em gozo", "Aprovada"]).lt("fim", hoje);
-    for (const v of encerradas ?? []) {
-      await supabaseAdmin.from("ferias").update({ status: "Concluída" }).eq("id", v.id);
-      summary.concluidas++;
-
-      const duracao = diffDays(parseISO(v.fim), parseISO(v.inicio));
-      const novoInicio = shiftToWeekday(addYears(parseISO(v.inicio), 1));
-      const novoFim = addDays(novoInicio, duracao);
-      const novoPeriodoAquisitivo = bumpAquisitivo(v.periodo_aquisitivo);
-
-      const { data: existente } = await supabaseAdmin
-        .from("ferias")
-        .select("id")
-        .eq("colaborador_id", v.colaborador_id)
-        .eq("inicio", toISO(novoInicio))
-        .eq("fim", toISO(novoFim))
-        .eq("periodo_aquisitivo", novoPeriodoAquisitivo)
-        .maybeSingle();
-
-      if (!existente) {
-        const { error: insertError } = await supabaseAdmin.from("ferias").insert({
-          colaborador_id: v.colaborador_id,
-          gestor_id: v.gestor_id,
-          inicio: toISO(novoInicio),
-          fim: toISO(novoFim),
-          periodo_aquisitivo: novoPeriodoAquisitivo,
-          status: "Pendente",
-        });
-        if (!insertError) summary.reagendadas++;
-      }
-    }
-
-    // 3. Faltas a partir de Férias em curso hoje.
-    // Inclui "Aprovada" para não depender apenas da promoção de status acontecer antes.
-    const { data: emGozo } = await supabaseAdmin
-      .from("ferias").select("colaborador_id")
-      .in("status", ["Em gozo", "Aprovada"]).lte("inicio", hoje).gte("fim", hoje);
-    for (const f of emGozo ?? []) {
-      const { error } = await supabaseAdmin.from("faltas").insert({
-        colaborador_id: f.colaborador_id, data: hoje,
-        motivo: MOTIVO_FERIAS, periodo: "Integral",
-        observacao: "Registrado automaticamente (Em gozo)",
-      });
-      if (!error) summary.faltasFerias++;
-    }
-
-    // 4. Faltas a partir de Licenças Ativas
-    const { data: licencas } = await supabaseAdmin
-      .from("licencas").select("colaborador_id, tipo")
-      .eq("status", "Ativa").lte("inicio", hoje).gte("fim", hoje);
-    for (const l of licencas ?? []) {
-      const motivo = motivoLicenca(l.tipo);
-      const { error } = await supabaseAdmin.from("faltas").insert({
-        colaborador_id: l.colaborador_id, data: hoje,
-        motivo, periodo: "Integral",
-        observacao: `Registrado automaticamente (Licença ${l.tipo})`,
-      });
-      if (!error) summary.faltasLicenca++;
-    }
-
-    // 5. Faltas a partir de Agendamentos do dia
-    const { data: agendamentos } = await supabaseAdmin
-      .from("agendamentos")
-      .select("colaborador_id, tipo, titulo, hora")
-      .eq("data", hoje)
-      .neq("status", "Cancelado");
-    for (const a of agendamentos ?? []) {
-      const motivo = motivoAgendamento(a.tipo);
-      const titulo = a.titulo?.trim();
-      const hora = a.hora?.slice(0, 5);
-      const detalhe = [titulo, hora].filter(Boolean).join(" às ");
-      const { error } = await supabaseAdmin.from("faltas").insert({
-        colaborador_id: a.colaborador_id,
-        data: hoje,
-        motivo,
-        periodo: "Integral",
-        observacao: detalhe
-          ? `Registrado automaticamente (Agendamento: ${detalhe})`
-          : `Registrado automaticamente (Agendamento: ${a.tipo})`,
-      });
-      if (!error) summary.faltasAgendamento++;
-    }
-
-    return summary;
-  });
+  .handler(async () => sincronizarFaltasDiaAtual());

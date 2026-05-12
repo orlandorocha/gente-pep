@@ -17,7 +17,6 @@ import { RowActions } from "@/components/RowActions";
 import { useColaboradores, useTable } from "@/hooks/useData";
 import { supabase } from "@/integrations/custom-supabase/client";
 import { solicitarFerias } from "@/lib/ferias.functions";
-import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
 import { formatLocalDateISO } from "@/lib/utils";
 import { formatDateBr, formatDateRangeBr } from "@/lib/date";
 import { toast } from "sonner";
@@ -56,6 +55,27 @@ function bumpAquisitivo(pa: string) {
   return `${Number(m[1]) + 1}/${Number(m[2]) + 1}`;
 }
 
+function getStatusAtualizado(status: FeriasRow["status"], inicio: string, fim: string): FeriasRow["status"] {
+  const hoje = todayISO();
+  if (status === "Aprovada" && inicio <= hoje && hoje <= fim) return "Em gozo";
+  return status;
+}
+
+async function registrarFaltaFeriasDoDia(colaboradorId: string) {
+  const hoje = todayISO();
+  const { error } = await supabase.from("faltas").insert({
+    colaborador_id: colaboradorId,
+    data: hoje,
+    motivo: "Férias",
+    periodo: "Integral",
+    observacao: "Registrado automaticamente (Em gozo)",
+  });
+
+  if (error && !/duplicate|unique/i.test(error.message)) {
+    throw error;
+  }
+}
+
 function FeriasPage() {
   const { data: colabs } = useColaboradores();
   const { data: ferias, reload } = useTable<FeriasRow>("ferias", "inicio", true);
@@ -67,7 +87,6 @@ function FeriasPage() {
   const [areaFilter, setAreaFilter] = useState("all");
   const [turnoFilter, setTurnoFilter] = useState("all");
   const [grupoEmGozoAberto, setGrupoEmGozoAberto] = useState<string | null>(null);
-  const sincronizar = useServerFn(sincronizarFaltasDoDia);
 
   // Auto-reagendamento ao detectar férias encerradas
   useEffect(() => {
@@ -121,11 +140,11 @@ function FeriasPage() {
     (async () => {
       for (const v of emCurso) {
         await supabase.from("ferias").update({ status: "Em gozo" }).eq("id", v.id);
+        await registrarFaltaFeriasDoDia(v.colaborador_id);
       }
-      await sincronizar();
       reload();
     })();
-  }, [ferias, reload, sincronizar]);
+  }, [ferias, reload]);
 
   const emGozo = useMemo(() => {
     const hoje = todayISO();
@@ -194,19 +213,26 @@ function FeriasPage() {
 
   async function decidir(id: string, acao: "aprovar" | "recusar") {
     try {
-      const novo = acao === "aprovar" ? "Aprovada" : "Recusada";
+      const item = ferias.find((row) => row.id === id);
+      if (!item) throw new Error("Férias não encontradas");
+
+      const statusBase = acao === "aprovar" ? "Aprovada" : "Recusada";
+      const statusFinal = getStatusAtualizado(statusBase, item.inicio, item.fim);
       const { error } = await supabase
         .from("ferias")
         .update({
-          status: novo,
+          status: statusFinal,
           decidido_em: new Date().toISOString(),
           decidido_por: "in-app",
-          motivo_recusa: null,
+          motivo_recusa: acao === "recusar" ? "Recusada manualmente" : null,
         })
         .eq("id", id)
         .eq("status", "Pendente");
+
       if (error) throw error;
-      await sincronizar();
+      if (statusFinal === "Em gozo") {
+        await registrarFaltaFeriasDoDia(item.colaborador_id);
+      }
       toast.success(acao === "aprovar" ? "Férias aprovadas" : "Férias recusadas");
       reload();
     } catch (e) { toast.error((e as Error).message); }
@@ -220,7 +246,15 @@ function FeriasPage() {
             <ImportFeriasButton colabs={colabs as any} onDone={reload} />
             <ExportFeriasButton ferias={filteredFerias as any} colabs={colabs as any} area={areaFilter} turno={turnoFilter} />
             <FormSheet triggerLabel="Solicitar férias" title="Solicitar férias">
-              {(close) => <FeriasForm colabs={colabs} onSaved={() => { reload(); close(); }} />}
+              {(close) => (
+                <FeriasForm
+                  colabs={colabs}
+                  ferias={ferias}
+                  onSaved={() => { reload(); close(); }}
+                  onEditExisting={(item) => { setEditing(item); close(); }}
+                  onDeletedExisting={reload}
+                />
+              )}
             </FormSheet>
           </div>
         } />
@@ -377,7 +411,6 @@ function FeriasEditForm({ initial, onSaved }: { initial: FeriasRow; onSaved: () 
   const [pa, setPa] = useState(initial.periodo_aquisitivo);
   const [status, setStatus] = useState<FeriasRow["status"]>(initial.status);
   const [submitting, setSubmitting] = useState(false);
-  const sincronizar = useServerFn(sincronizarFaltasDoDia);
   const totalDias = useMemo(() => {
     if (!inicio || !fim || fim < inicio) return null;
     return diffDays(parseISO(fim), parseISO(inicio)) + 1;
@@ -390,14 +423,28 @@ function FeriasEditForm({ initial, onSaved }: { initial: FeriasRow; onSaved: () 
       const dia = parseISO(inicio).getDay();
       if (dia === 0 || dia === 6) { toast.error("Início não pode cair em sábado ou domingo"); return; }
       setSubmitting(true);
-      const { error } = await supabase.from("ferias").update({
-        inicio, fim, periodo_aquisitivo: pa, status: status as any,
-      }).eq("id", initial.id);
-      setSubmitting(false);
-      if (error) { toast.error(error.message); return; }
-      await sincronizar();
-      toast.success("Férias atualizadas");
-      onSaved();
+      try {
+        const statusFinal = getStatusAtualizado(status, inicio, fim);
+        const { error } = await supabase
+          .from("ferias")
+          .update({
+            inicio,
+            fim,
+            periodo_aquisitivo: pa,
+            status: statusFinal,
+          })
+          .eq("id", initial.id);
+        if (error) throw error;
+        if (statusFinal === "Em gozo") {
+          await registrarFaltaFeriasDoDia(initial.colaborador_id);
+        }
+        toast.success("Férias atualizadas");
+        onSaved();
+      } catch (error) {
+        toast.error((error as Error).message);
+      } finally {
+        setSubmitting(false);
+      }
     }}>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-2"><Label>Início</Label><Input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} required /></div>
@@ -421,13 +468,28 @@ function FeriasEditForm({ initial, onSaved }: { initial: FeriasRow; onSaved: () 
   );
 }
 
-function FeriasForm({ colabs, onSaved }: { colabs: any[]; onSaved: () => void }) {
+function FeriasForm({
+  colabs,
+  ferias,
+  onSaved,
+  onEditExisting,
+  onDeletedExisting,
+}: {
+  colabs: any[];
+  ferias: FeriasRow[];
+  onSaved: () => void;
+  onEditExisting: (item: FeriasRow) => void;
+  onDeletedExisting: () => void;
+}) {
   const [colaboradorId, setColaboradorId] = useState("");
   const [inicio, setInicio] = useState("");
   const [fim, setFim] = useState("");
   const [periodoAquisitivo, setPa] = useState("2025/2026");
   const [submitting, setSubmitting] = useState(false);
+  const [duplicate, setDuplicate] = useState<FeriasRow | null>(null);
+  const [deletingDuplicate, setDeletingDuplicate] = useState(false);
   const solicitar = useServerFn(solicitarFerias);
+  const colabMap = useMemo(() => new Map(colabs.map((colab) => [colab.id, colab])), [colabs]);
   const totalDias = useMemo(() => {
     if (!inicio || !fim || fim < inicio) return null;
     return diffDays(parseISO(fim), parseISO(inicio)) + 1;
@@ -441,6 +503,15 @@ function FeriasForm({ colabs, onSaved }: { colabs: any[]; onSaved: () => void })
       const dia = parseISO(inicio).getDay();
       if (dia === 0 || dia === 6) {
         toast.error("O início das férias não pode cair em sábado ou domingo");
+        return;
+      }
+      const duplicateRow = ferias.find((item) => (
+        item.colaborador_id === colaboradorId
+        && item.inicio === inicio
+        && item.fim === fim
+      ));
+      if (duplicateRow) {
+        setDuplicate(duplicateRow);
         return;
       }
       setSubmitting(true);
@@ -467,6 +538,73 @@ function FeriasForm({ colabs, onSaved }: { colabs: any[]; onSaved: () => void })
       <div className="space-y-2"><Label>Período aquisitivo</Label><Input value={periodoAquisitivo} onChange={(e) => setPa(e.target.value)} required /></div>
       <p className="text-xs text-muted-foreground">A solicitação será enviada ao gestor para <b>aprovação</b> por email e Microsoft Teams. O início não pode cair em fim de semana.</p>
       <FormFooter submitting={submitting} label="Enviar solicitação" />
+
+      <Dialog open={!!duplicate} onOpenChange={(open) => !open && setDuplicate(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Solicitação já existente</DialogTitle>
+            <DialogDescription>
+              Já existe uma solicitação de férias para este colaborador no mesmo período. Escolha como deseja continuar.
+            </DialogDescription>
+          </DialogHeader>
+          {duplicate && (() => {
+            const colaborador = colabMap.get(duplicate.colaborador_id);
+            return (
+              <div className="space-y-3 text-sm">
+                <div className="rounded-md border bg-muted/30 p-3">
+                  <div><span className="font-medium">Colaborador:</span> {colaborador?.nome ?? "—"}</div>
+                  <div><span className="font-medium">GPID:</span> {colaborador?.gpid ?? "—"}</div>
+                  <div><span className="font-medium">Período:</span> {formatDateRangeBr(duplicate.inicio, duplicate.fim)}</div>
+                  <div><span className="font-medium">Período aquisitivo:</span> {duplicate.periodo_aquisitivo}</div>
+                  <div><span className="font-medium">Status:</span> {duplicate.status}</div>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      toast("Mantido o registro já existente.");
+                      setDuplicate(null);
+                      onSaved();
+                    }}
+                  >
+                    Manter registro existente
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setDuplicate(null);
+                      onEditExisting(duplicate);
+                    }}
+                  >
+                    Editar existente
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={deletingDuplicate}
+                    onClick={async () => {
+                      setDeletingDuplicate(true);
+                      const { error } = await supabase.from("ferias").delete().eq("id", duplicate.id);
+                      setDeletingDuplicate(false);
+                      if (error) {
+                        toast.error(error.message);
+                        return;
+                      }
+                      toast.success("Solicitação existente excluída. Você já pode enviar uma nova solicitação.");
+                      setDuplicate(null);
+                      onDeletedExisting();
+                    }}
+                  >
+                    {deletingDuplicate ? "Excluindo..." : "Excluir existente"}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

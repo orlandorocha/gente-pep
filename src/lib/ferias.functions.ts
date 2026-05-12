@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/custom-supabase/client.server";
 import { notifyVacationRequest } from "./notifications.server";
+import { sincronizarFaltasDiaAtual } from "./sync.functions";
 
 const SolicitarSchema = z.object({
   colaboradorId: z.string().uuid(),
@@ -15,10 +16,22 @@ export const solicitarFerias = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { data: colab, error: cErr } = await supabaseAdmin
       .from("colaboradores")
-      .select("id, nome, gestor_id")
+      .select("id, nome, gpid, gestor_id")
       .eq("id", data.colaboradorId)
       .maybeSingle();
     if (cErr || !colab) throw new Error("Colaborador não encontrado");
+
+    const { data: existente, error: duplicateError } = await supabaseAdmin
+      .from("ferias")
+      .select("id")
+      .eq("colaborador_id", data.colaboradorId)
+      .eq("inicio", data.inicio)
+      .eq("fim", data.fim)
+      .maybeSingle();
+    if (duplicateError) throw new Error(duplicateError.message);
+    if (existente) {
+      throw new Error(`Já existe uma solicitação de férias para ${colab.nome} (${colab.gpid}) nesse mesmo período.`);
+    }
 
     const { data: ferias, error } = await supabaseAdmin
       .from("ferias")
@@ -68,6 +81,14 @@ const DecideSchema = z.object({
   motivo: z.string().max(500).optional(),
 });
 
+const AtualizarSchema = z.object({
+  feriasId: z.string().uuid(),
+  inicio: z.string().min(10).max(10),
+  fim: z.string().min(10).max(10),
+  periodoAquisitivo: z.string().min(4).max(20),
+  status: z.enum(["Pendente", "Aprovada", "Recusada", "Em gozo", "Concluída"]),
+});
+
 export const decidirFerias = createServerFn({ method: "POST" })
   .inputValidator((d) => DecideSchema.parse(d))
   .handler(async ({ data }) => {
@@ -83,5 +104,28 @@ export const decidirFerias = createServerFn({ method: "POST" })
       .eq("id", data.feriasId)
       .eq("status", "Pendente");
     if (error) throw new Error(error.message);
+    await sincronizarFaltasDiaAtual();
     return { ok: true, status: novo };
+  });
+
+export const atualizarFerias = createServerFn({ method: "POST" })
+  .inputValidator((d) => AtualizarSchema.parse(d))
+  .handler(async ({ data }) => {
+    if (data.fim < data.inicio) {
+      throw new Error("Fim deve ser após o início");
+    }
+
+    const { error } = await supabaseAdmin
+      .from("ferias")
+      .update({
+        inicio: data.inicio,
+        fim: data.fim,
+        periodo_aquisitivo: data.periodoAquisitivo,
+        status: data.status,
+      })
+      .eq("id", data.feriasId);
+
+    if (error) throw new Error(error.message);
+    await sincronizarFaltasDiaAtual();
+    return { ok: true };
   });
