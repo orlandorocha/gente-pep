@@ -34,7 +34,11 @@ export function ImportFaltasButton({ colabs, onDone }: { colabs: Colab[]; onDone
       for (const [i, r] of rows.entries()) {
         const data = toISODate(r.data ?? r.Data);
         const ref = String(r.colaborador_id ?? r.colaborador ?? r.Colaborador ?? "").trim();
-        const motivo = String(r.motivo ?? r.Motivo ?? "Falta").trim();
+        const motivoRaw = String(r.motivo ?? r.Motivo ?? "Falta").trim();
+        const motivo = motivoRaw.localeCompare("Falta", "pt-BR", { sensitivity: "accent" }) === 0
+          || motivoRaw.localeCompare("Falta", "pt-BR", { sensitivity: "base" }) === 0
+          ? "Falta"
+          : motivoRaw;
         const observacao = String(r.observacao ?? r.Observação ?? "").trim();
         if (!data) { erros.push(`Linha ${i + 2}: data inválida`); continue; }
         const c = findColaborador(colabs, ref);

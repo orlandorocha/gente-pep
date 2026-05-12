@@ -19,6 +19,10 @@ function normalizeGestorEmail(value: string) {
   return value.trim().toLowerCase();
 }
 
+function buildGestorFallbackEmail(nome: string) {
+  return `${normalizeGestorNome(nome).replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "") || "gestor"}@guardiao-gente.local`;
+}
+
 export function GestoresModal({
   gestores, onChanged,
 }: { gestores: GestorRow[]; onChanged: () => void }) {
@@ -61,7 +65,7 @@ export function GestoresModal({
       const preparedRows = rows.map((row) => ({
         ...row,
         nome: row.nome.trim(),
-        email: normalizeGestorEmail(row.email),
+        email: normalizeGestorEmail(row.email) || buildGestorFallbackEmail(row.nome),
       }));
 
       const usedEmails = new Map<string, string>();

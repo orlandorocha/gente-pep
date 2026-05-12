@@ -50,15 +50,19 @@ export function ImportColaboradoresButton({
 
         const cargoRaw = String(r.cargo ?? r.Cargo ?? "").trim();
         const areaRaw = String(r.area ?? r.Area ?? r.Área ?? "").trim();
-        const cargo = matchFromList(CARGOS, cargoRaw) ?? cargoRaw;
-        const area = matchFromList(AREAS, areaRaw) ?? areaRaw;
+        const cargo = cargoRaw ? (matchFromList(CARGOS, cargoRaw) ?? cargoRaw) : null;
+        const area = areaRaw ? (matchFromList(AREAS, areaRaw) ?? areaRaw) : null;
 
-        const turno = parseTurno(r.turno ?? r.Turno);
-        const statusRaw = String(r.stats ?? r.status ?? r.Status ?? "Ativo").trim();
-        const status = ["Ativo","Inativo","Afastado"].find((s) => s.toLowerCase() === statusRaw.toLowerCase()) ?? "Ativo";
+        const turnoRaw = r.turno ?? r.Turno;
+        const turno = String(turnoRaw ?? "").trim() ? parseTurno(turnoRaw) : null;
+        const statusRaw = String(r.stats ?? r.status ?? r.Status ?? "").trim();
+        const status = statusRaw
+          ? (["Ativo", "Inativo", "Afastado"].find((s) => s.toLowerCase() === statusRaw.toLowerCase()) ?? "Ativo")
+          : null;
 
         const gestorRef = String(r.gestor_id ?? r.gestor ?? r.Gestor ?? "").trim().toLowerCase();
         let gestor_id: string | null = null;
+        let gestorMatched = false;
         if (gestorRef) {
           gestor_id = gMap.get(gestorRef) ?? null;
           if (!gestor_id) {
@@ -66,12 +70,14 @@ export function ImportColaboradoresButton({
             const first = gestorRef.split(/\s+/)[0];
             for (const [k, v] of gMap) if (k.startsWith(first)) { gestor_id = v; break; }
           }
+          gestorMatched = !!gestor_id;
+          if (!gestorMatched) erros.push(`Linha ${i + 2}: gestor "${gestorRef}" não encontrado. O vínculo atual será preservado, se existir.`);
         }
 
-        const email = String(r.email ?? r.Email ?? "").trim() || `${gpid}@empresa.local`;
+        const email = String(r.email ?? r.Email ?? "").trim() || null;
 
         inserts.push({
-          nome, email, gpid, cargo, area, turno, status, gestor_id,
+          nome, email, gpid, cargo, area, turno, status, gestor_id, gestorMatched, hasGestorRef: !!gestorRef,
         });
       }
 
@@ -86,7 +92,7 @@ export function ImportColaboradoresButton({
         const gpids = batch.map((row) => row.gpid);
         const { data: existentes, error: readError } = await supabase
           .from("colaboradores")
-          .select("gpid")
+          .select("gpid, email, cargo, area, turno, status, gestor_id")
           .in("gpid", gpids);
 
         if (readError) {
@@ -94,21 +100,50 @@ export function ImportColaboradoresButton({
           continue;
         }
 
-        const existingGpids = new Set((existentes ?? []).map((row) => row.gpid));
+        const existingRows = new Map((existentes ?? []).map((row) => [row.gpid, row]));
+        const existingGpids = new Set(existingRows.keys());
+        const mergedBatch = batch.map((row) => {
+          const existing = existingRows.get(row.gpid);
+          if (!existing) {
+            return {
+              nome: row.nome,
+              gpid: row.gpid,
+              email: row.email ?? `${row.gpid}@empresa.local`,
+              cargo: row.cargo ?? "",
+              area: row.area ?? "",
+              turno: row.turno ?? "Manhã",
+              status: row.status ?? "Ativo",
+              gestor_id: row.gestorMatched ? row.gestor_id : null,
+            };
+          }
+
+          return {
+            nome: row.nome,
+            gpid: row.gpid,
+            email: row.email ?? existing.email ?? `${row.gpid}@empresa.local`,
+            cargo: row.cargo ?? existing.cargo ?? "",
+            area: row.area ?? existing.area ?? "",
+            turno: row.turno ?? existing.turno ?? "Manhã",
+            status: row.status ?? existing.status ?? "Ativo",
+            gestor_id: row.hasGestorRef
+              ? (row.gestorMatched ? row.gestor_id : existing.gestor_id ?? null)
+              : (existing.gestor_id ?? null),
+          };
+        });
         const { error: batchError } = await supabase
           .from("colaboradores")
-          .upsert(batch, { onConflict: "gpid", ignoreDuplicates: false });
+          .upsert(mergedBatch, { onConflict: "gpid", ignoreDuplicates: false });
 
         if (!batchError) {
-          for (const row of batch) {
+          for (const row of mergedBatch) {
             if (existingGpids.has(row.gpid)) atualizados += 1;
             else inseridos += 1;
           }
-          ok += batch.length;
+          ok += mergedBatch.length;
           continue;
         }
 
-        for (const row of batch) {
+        for (const row of mergedBatch) {
           const existed = existingGpids.has(row.gpid);
           const { error } = await supabase
             .from("colaboradores")

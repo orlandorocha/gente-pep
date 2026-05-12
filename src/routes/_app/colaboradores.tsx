@@ -57,7 +57,7 @@ function ColaboradoresPage() {
                 <Button><Plus className="mr-2 h-4 w-4" /> Novo colaborador</Button>
               </SheetTrigger>
               <SheetContent className="sm:max-w-md overflow-y-auto">
-                <SheetHeader><SheetTitle>Novo colaborador</SheetTitle></SheetHeader>
+                <SheetHeader><SheetTitle></SheetTitle></SheetHeader>
                 <ColaboradorForm gestores={gestores} onSaved={() => { reload(); setOpen(false); }} />
               </SheetContent>
             </Sheet>
