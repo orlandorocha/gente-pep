@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useColaboradores, useTable } from "@/hooks/useData";
 import { DataPagination, usePagination } from "@/components/DataPagination";
+import { formatDateBr } from "@/lib/date";
 
 export const Route = createFileRoute("/_app/alertas")({ component: AlertasPage });
 
@@ -158,7 +159,7 @@ function AlertasPage() {
                       <Badge variant={a.criticidade === "Alta" ? "destructive" : "secondary"}>{a.criticidade}</Badge>
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">{a.mensagem}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Detectado em {a.data}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Detectado em {formatDateBr(a.data)}</p>
                   </div>
                 </div>
               </CardContent>

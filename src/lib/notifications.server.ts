@@ -1,6 +1,8 @@
 // Server-only helpers for sending vacation approval requests via Email + Teams.
 // Both channels are best-effort: missing config is logged and skipped.
 
+import { formatDateRangeBr } from "./date";
+
 const APP_URL =
   process.env.APP_URL ||
   process.env.SITE_URL ||
@@ -30,7 +32,7 @@ export async function sendVacationEmail(p: FeriasPayload): Promise<{ ok: boolean
     <h2 style="margin:0 0 8px">Solicitação de Férias — Guardião de Gente</h2>
     <p style="color:#475569;margin:0 0 16px">${p.colaboradorNome} solicitou férias e aguarda sua aprovação.</p>
     <table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:14px">
-      <tr><td style="padding:6px 0;color:#64748b">Período</td><td><b>${p.inicio} → ${p.fim}</b></td></tr>
+      <tr><td style="padding:6px 0;color:#64748b">Período</td><td><b>${formatDateRangeBr(p.inicio, p.fim)}</b></td></tr>
       <tr><td style="padding:6px 0;color:#64748b">Período aquisitivo</td><td>${p.periodoAquisitivo}</td></tr>
       <tr><td style="padding:6px 0;color:#64748b">Gestor</td><td>${p.gestorNome}</td></tr>
     </table>
@@ -64,7 +66,7 @@ export async function sendVacationTeams(p: FeriasPayload): Promise<{ ok: boolean
   const reject = approvalUrl(p.token, "reject");
   const text =
     `**Solicitação de férias** — ${p.colaboradorNome}\n\n` +
-    `Período: **${p.inicio} → ${p.fim}** (${p.periodoAquisitivo})\n\n` +
+    `Período: **${formatDateRangeBr(p.inicio, p.fim)}** (${p.periodoAquisitivo})\n\n` +
     `[✅ Aprovar](${approve}) &nbsp;&nbsp; [❌ Recusar](${reject})`;
 
   try {

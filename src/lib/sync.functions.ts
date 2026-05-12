@@ -97,10 +97,11 @@ export const sincronizarFaltasDoDia = createServerFn({ method: "POST" })
       }
     }
 
-    // 3. Faltas a partir de Férias Em gozo (ativo hoje)
+    // 3. Faltas a partir de Férias em curso hoje.
+    // Inclui "Aprovada" para não depender apenas da promoção de status acontecer antes.
     const { data: emGozo } = await supabaseAdmin
       .from("ferias").select("colaborador_id")
-      .eq("status", "Em gozo").lte("inicio", hoje).gte("fim", hoje);
+      .in("status", ["Em gozo", "Aprovada"]).lte("inicio", hoje).gte("fim", hoje);
     for (const f of emGozo ?? []) {
       const { error } = await supabaseAdmin.from("faltas").insert({
         colaborador_id: f.colaborador_id, data: hoje,

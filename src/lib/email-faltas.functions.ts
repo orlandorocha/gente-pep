@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import * as XLSX from "xlsx";
+import { formatDateBr, formatDateRangeBr } from "./date";
 
 const Schema = z.object({
   inicio: z.string().length(10),
@@ -10,6 +11,7 @@ const Schema = z.object({
     gestorEmail: z.string().min(1),
     turno: z.string().min(1),
     rows: z.array(z.object({
+      Gpid: z.any().optional(),
       Colaborador: z.string(),
       Área: z.string(),
       Motivo: z.string(),
@@ -21,6 +23,7 @@ const Schema = z.object({
 });
 
 type Row = {
+  Gpid: any;
   Colaborador: string; Área: string; Motivo: string;
   Turno: string; Data: string; Período: string;
 };
@@ -31,7 +34,10 @@ function isPlaceholderEmail(email: string): boolean {
 }
 
 function rowsToXlsxBase64(rows: Row[], sheet = "Faltas"): string {
-  const ws = XLSX.utils.json_to_sheet(rows);
+  const ws = XLSX.utils.json_to_sheet(rows.map((row) => ({
+    ...row,
+    Data: formatDateBr(row.Data),
+  })));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheet);
   const buf = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
@@ -41,10 +47,11 @@ function rowsToXlsxBase64(rows: Row[], sheet = "Faltas"): string {
 function rowsToHtml(rows: Row[]): string {
   if (!rows.length) return "<p>Nenhuma falta registrada no período.</p>";
   const cells = (k: keyof Row) => rows.map(r => `<td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">${r[k] ?? ""}</td>`);
-  const head = ["Data","Colaborador","Área","Turno","Motivo","Período"]
+  const head = ["Data","Gpid","Colaborador","Área","Turno","Motivo","Período"]
     .map(h => `<th style="text-align:left;padding:8px 10px;background:#f1f5f9;border-bottom:1px solid #cbd5e1">${h}</th>`).join("");
   const body = rows.map(r =>
-    `<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace">${r.Data}</td>` +
+    `<tr><td style="padding:6px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace">${formatDateBr(r.Data)}</td>` +
+    `<td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">${r.Gpid}</td>` +
     `<td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">${r.Colaborador}</td>` +
     `<td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">${r.Área}</td>` +
     `<td style="padding:6px 10px;border-bottom:1px solid #e5e7eb">${r.Turno}</td>` +
@@ -86,7 +93,7 @@ export const enviarFaltasParaGestores = createServerFn({ method: "POST" })
       }
       const html = `
       <div style="font-family:Inter,Arial,sans-serif;color:#0f172a;max-width:720px">
-        <h2 style="margin:0 0 8px">Faltas — ${turno} (${data.inicio} a ${data.fim})</h2>
+        <h2 style="margin:0 0 8px">Faltas — ${turno} (${formatDateRangeBr(data.inicio, data.fim).replace(" → ", " a ")})</h2>
         <p style="color:#475569">Olá ${gestor.nome}, segue o resumo das faltas dos colaboradores do turno <b>${turno}</b>.</p>
         ${rowsToHtml(rows)}
         <p style="color:#94a3b8;font-size:12px;margin-top:16px">Anexo: planilha .xlsx com os mesmos dados.</p>
@@ -95,7 +102,7 @@ export const enviarFaltasParaGestores = createServerFn({ method: "POST" })
       try {
         const info = await sendMail({
           to: gestor.email,
-          subject: `Faltas ${turno} — ${data.inicio} a ${data.fim}`,
+          subject: `Faltas ${turno} — ${formatDateRangeBr(data.inicio, data.fim).replace(" → ", " a ")}`,
           html,
           attachments: [{
             filename: `faltas-${turno}-${data.inicio}_${data.fim}.xlsx`,

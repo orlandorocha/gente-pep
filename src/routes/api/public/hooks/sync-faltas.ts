@@ -1,11 +1,28 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
 
+function isAuthorized(request: Request) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return true;
+
+  const authHeader = request.headers.get("authorization");
+  if (authHeader === `Bearer ${secret}`) return true;
+
+  const cronHeader = request.headers.get("x-cron-secret");
+  return cronHeader === secret;
+}
+
 // Endpoint público chamado pelo pg_cron diariamente.
 export const Route = createFileRoute("/api/public/hooks/sync-faltas")({
   server: {
     handlers: {
-      POST: async () => {
+      POST: async ({ request }) => {
+        if (!isAuthorized(request)) {
+          return new Response(JSON.stringify({ ok: false, error: "Unauthorized" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         try {
           const result = await sincronizarFaltasDoDia();
           return new Response(JSON.stringify({ ok: true, ...result }), {
@@ -17,7 +34,13 @@ export const Route = createFileRoute("/api/public/hooks/sync-faltas")({
           });
         }
       },
-      GET: async () => {
+      GET: async ({ request }) => {
+        if (!isAuthorized(request)) {
+          return new Response(JSON.stringify({ ok: false, error: "Unauthorized" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         const result = await sincronizarFaltasDoDia();
         return new Response(JSON.stringify({ ok: true, ...result }), {
           headers: { "Content-Type": "application/json" },

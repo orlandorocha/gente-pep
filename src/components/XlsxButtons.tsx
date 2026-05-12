@@ -9,6 +9,7 @@ import { readXlsxRows, downloadXlsx, findColaborador, toISODate } from "@/lib/xl
 import { supabase } from "@/integrations/custom-supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { enviarFaltasParaGestores } from "@/lib/email-faltas.functions";
+import { formatDateBr } from "@/lib/date";
 
 type Colab = { id: string; nome: string; gpid: string; area: string; turno: string; gestor_id?: string | null };
 type Falta = { id: string; colaborador_id: string; data: string; motivo: string; periodo: string };
@@ -76,11 +77,12 @@ export function ExportFaltasButton({ faltas, colabs }: { faltas: Falta[]; colabs
     const rows = faltas.map(f => {
       const c = colMap.get(f.colaborador_id);
       return {
+        GPID: c?.gpid ?? "—",
         Colaborador: c?.nome ?? "—",
         Área: c?.area ?? "—",
         Motivo: f.motivo,
         Turno: c?.turno ?? "—",
-        Data: f.data,
+        Data: formatDateBr(f.data),
       };
     });
     downloadXlsx(rows, "Faltas", `faltas-${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -124,7 +126,7 @@ export function EmailGestoresButton() {
       const colabIds = [...new Set(faltas.map((f) => f.colaborador_id))];
       const { data: colabs, error: colabsError } = await supabase
         .from("colaboradores")
-        .select("id, nome, area, turno, gestor_id")
+        .select("id, nome, gpid, area, turno, gestor_id")
         .in("id", colabIds);
       if (colabsError) throw new Error(`Falha ao buscar colaboradores: ${colabsError.message}`);
 
@@ -140,7 +142,7 @@ export function EmailGestoresButton() {
         gestorNome: string;
         gestorEmail: string;
         turno: string;
-        rows: Array<{ Colaborador: string; Área: string; Motivo: string; Turno: string; Data: string; Período: string }>;
+        rows: Array<{ Gpid: string; Colaborador: string; Área: string; Motivo: string; Turno: string; Data: string; Período: string }>;
       }>();
 
       for (const falta of faltas) {
@@ -158,6 +160,7 @@ export function EmailGestoresButton() {
           });
         }
         grupos.get(key)?.rows.push({
+          Gpid: c.gpid,
           Colaborador: c.nome,
           Área: c.area,
           Motivo: falta.motivo,
@@ -309,8 +312,8 @@ export function ExportFeriasButton({
         GPID: c?.gpid ?? "—",
         Área: c?.area ?? "—",
         Turno: c?.turno ?? "—",
-        Início: f.inicio,
-        Fim: f.fim,
+        Início: formatDateBr(f.inicio),
+        Fim: formatDateBr(f.fim),
         "Período aquisitivo": f.periodo_aquisitivo,
         Status: f.status,
       };

@@ -16,6 +16,7 @@ import { RowActions } from "@/components/RowActions";
 import { useColaboradores, useTable } from "@/hooks/useData";
 import { supabase } from "@/integrations/custom-supabase/client";
 import { DataPagination, usePagination } from "@/components/DataPagination";
+import { formatDateRangeBr } from "@/lib/date";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_app/licencas")({ component: LicencasPage });
@@ -89,7 +90,7 @@ function LicencasPage() {
                   <TableRow key={l.id}>
                     <TableCell><div className="font-medium">{c?.nome}</div><div className="text-xs text-muted-foreground">{c?.area}</div></TableCell>
                     <TableCell><Badge variant="secondary">{l.tipo}</Badge></TableCell>
-                    <TableCell className="font-mono text-xs">{l.inicio} → {l.fim}</TableCell>
+                    <TableCell className="font-mono text-xs">{formatDateRangeBr(l.inicio, l.fim)}</TableCell>
                     <TableCell><Badge variant={l.status === "Ativa" ? "default" : "outline"}>{l.status}</Badge></TableCell>
                     <TableCell className="text-muted-foreground">{l.observacoes ?? "—"}</TableCell>
                     <TableCell><RowActions table="licencas" id={l.id} label="licença" onChanged={reload} onEdit={() => setEditing(l)} /></TableCell>

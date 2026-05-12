@@ -150,7 +150,9 @@ export function GestoresModal({
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Cadastrar gestores e emails</DialogTitle>
-            <DialogDescription>Atualize os emails dos gestores responsáveis por cada turno.</DialogDescription>
+            <DialogDescription>
+              Atualize os emails dos gestores responsáveis pelos colaboradores de cada turno. Cada gestor recebe somente o relatório dos colaboradores vinculados a ele no turno cadastrado.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
             {rows.map((r, i) => (

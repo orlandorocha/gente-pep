@@ -19,6 +19,7 @@ import { supabase } from "@/integrations/custom-supabase/client";
 import { solicitarFerias } from "@/lib/ferias.functions";
 import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
 import { formatLocalDateISO } from "@/lib/utils";
+import { formatDateBr, formatDateRangeBr } from "@/lib/date";
 import { toast } from "sonner";
 import { Check, X, CalendarRange } from "lucide-react";
 import { ExportFeriasButton, ImportFeriasButton } from "@/components/XlsxButtons";
@@ -283,9 +284,9 @@ function FeriasPage() {
                   <div className="mt-3 space-y-1">
                     <Progress value={pct} className="h-2" />
                     <div className="flex justify-between text-[11px] font-mono text-muted-foreground">
-                      <span>{v.inicio}</span>
+                      <span>{formatDateBr(v.inicio)}</span>
                       <span>Dia {passados} de {total} · {pct}%</span>
-                      <span>{v.fim}</span>
+                      <span>{formatDateBr(v.fim)}</span>
                     </div>
                   </div>
                 </div>
@@ -335,7 +336,7 @@ function FeriasPage() {
                 return (
                   <TableRow key={v.id}>
                     <TableCell><div className="font-medium">{c?.nome}</div><div className="text-xs text-muted-foreground">{c?.area}</div></TableCell>
-                    <TableCell className="font-mono text-xs">{v.inicio} → {v.fim}</TableCell>
+                    <TableCell className="font-mono text-xs">{formatDateRangeBr(v.inicio, v.fim)}</TableCell>
                     <TableCell>{v.periodo_aquisitivo}</TableCell>
                     <TableCell>
                       <Badge variant={v.status === "Em gozo" ? "default" : v.status === "Aprovada" ? "secondary" : v.status === "Recusada" ? "destructive" : "outline"}>{v.status}</Badge>

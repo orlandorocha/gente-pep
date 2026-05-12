@@ -20,6 +20,7 @@ import { supabase } from "@/integrations/custom-supabase/client";
 import { criarAgendamento } from "@/lib/agendamentos.functions";
 import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
 import { formatLocalDateISO } from "@/lib/utils";
+import { formatDateBr } from "@/lib/date";
 import { DataPagination, usePagination } from "@/components/DataPagination";
 import { toast } from "sonner";
 
@@ -120,7 +121,7 @@ function AgendamentosPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right text-sm">
-                    <div className="font-mono">{a.data}</div>
+                    <div className="font-mono">{formatDateBr(a.data)}</div>
                     <div className="text-xs text-muted-foreground">{a.hora?.slice(0,5)}</div>
                   </div>
                   <Badge variant={a.prioridade === "Alta" ? "destructive" : a.prioridade === "Média" ? "default" : "secondary"}>{a.prioridade}</Badge>

@@ -19,6 +19,7 @@ import { MOTIVOS } from "@/data/motivos";
 import { toast } from "sonner";
 import { ImportFaltasButton, ExportFaltasButton, EmailGestoresButton } from "@/components/XlsxButtons";
 import { DataPagination, usePagination } from "@/components/DataPagination";
+import { formatDateBr } from "@/lib/date";
 
 export const Route = createFileRoute("/_app/faltas")({ component: FaltasPage });
 
@@ -112,7 +113,7 @@ function FaltasPage() {
                 const origem = getOrigemInfo(f.observacao);
                 return (
                   <TableRow key={f.id}>
-                    <TableCell className="font-mono text-xs">{f.data}</TableCell>
+                    <TableCell className="font-mono text-xs">{formatDateBr(f.data)}</TableCell>
                     <TableCell><div className="font-medium">{c?.nome}</div><div className="text-xs text-muted-foreground">{c?.gpid}</div></TableCell>
                     <TableCell>{c?.area}</TableCell>
                     <TableCell><Badge variant={f.motivo === "Falta" ? "destructive" : "secondary"}>{f.motivo}</Badge></TableCell>

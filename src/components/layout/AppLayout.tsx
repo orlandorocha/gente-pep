@@ -1,4 +1,6 @@
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { Button } from "@/components/ui/button";
@@ -6,6 +8,8 @@ import { LogOut, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/custom-supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
+import { formatLocalDateISO } from "@/lib/utils";
 
 const titles: Record<string, { title: string; sub: string }> = {
   "/dashboard": { title: "Dashboard executivo", sub: "Visão consolidada de pessoas e operação" },
@@ -22,10 +26,29 @@ export function AppLayout() {
   const path = useRouterState({ select: (r) => r.location.pathname });
   const navigate = useNavigate();
   const { user } = useAuth();
+  const sincronizar = useServerFn(sincronizarFaltasDoDia);
+  const syncStartedRef = useRef(false);
   const meta = titles[path] ?? { title: "Guardião de Gente", sub: "" };
 
   const initials = (user?.email ?? "U").slice(0, 2).toUpperCase();
   const gpid = (user?.user_metadata as { gpid?: string } | undefined)?.gpid;
+
+  useEffect(() => {
+    if (!user || syncStartedRef.current || typeof window === "undefined") return;
+    syncStartedRef.current = true;
+
+    const today = formatLocalDateISO();
+    const storageKey = `faltas-sync:${today}`;
+    if (window.sessionStorage.getItem(storageKey) === "done") return;
+
+    void sincronizar()
+      .then(() => {
+        window.sessionStorage.setItem(storageKey, "done");
+      })
+      .catch(() => {
+        syncStartedRef.current = false;
+      });
+  }, [sincronizar, user]);
 
   return (
     <SidebarProvider>
