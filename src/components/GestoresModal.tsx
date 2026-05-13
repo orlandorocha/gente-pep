@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Trash2, UserCog, Send } from "lucide-react";
+import { MailX, UserCog, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/custom-supabase/client";
@@ -21,6 +21,11 @@ function normalizeGestorEmail(value: string) {
 
 function buildGestorFallbackEmail(nome: string) {
   return `${normalizeGestorNome(nome).replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "") || "gestor"}@guardiao-gente.local`;
+}
+
+function isGestorFallbackEmail(nome: string, email?: string | null) {
+  if (!email) return false;
+  return normalizeGestorEmail(email) === buildGestorFallbackEmail(nome);
 }
 
 export function GestoresModal({
@@ -55,7 +60,7 @@ export function GestoresModal({
     const map = new Map(gestores.map((g) => [normalizeGestorNome(g.nome), g]));
     setRows(GESTORES.map((nome) => {
       const g = map.get(normalizeGestorNome(nome));
-      return { nome, email: g?.email ?? "", id: g?.id };
+      return { nome, email: g?.email && !isGestorFallbackEmail(nome, g.email) ? g.email : "", id: g?.id };
     }));
   }, [open, gestores]);
 
@@ -137,12 +142,20 @@ export function GestoresModal({
 
   async function remover(id?: string) {
     if (!id) return;
-    if (!confirm("Remover gestor?")) return;
-    const { error } = await supabase.from("gestores").delete().eq("id", id);
+    const row = rows.find((item) => item.id === id);
+    if (!row) return;
+    if (!confirm(`Remover o e-mail do gestor ${row.nome}? O nome continuará disponível para manter os vínculos existentes.`)) return;
+    const { error } = await supabase
+      .from("gestores")
+      .update({
+        email: buildGestorFallbackEmail(row.nome),
+        teams_user_id: null,
+      })
+      .eq("id", id);
     if (error) { toast.error(error.message); return; }
-    toast.success("Removido");
+    toast.success("E-mail do gestor removido sem perder o vínculo do nome");
     onChanged();
-    setRows((rs) => rs.map((r) => r.id === id ? { ...r, id: undefined, email: "" } : r));
+    setRows((rs) => rs.map((r) => r.id === id ? { ...r, email: "" } : r));
   }
 
   return (
@@ -173,8 +186,8 @@ export function GestoresModal({
                 <Button variant="outline" size="icon" title="Testar SMTP" onClick={() => testar(r.email)} disabled={testing === r.email}>
                   <Send className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="icon" onClick={() => remover(r.id)} disabled={!r.id}>
-                  <Trash2 className="h-4 w-4" />
+                <Button variant="ghost" size="icon" title="Limpar e-mail do gestor" onClick={() => remover(r.id)} disabled={!r.id}>
+                  <MailX className="h-4 w-4" />
                 </Button>
               </div>
             ))}
