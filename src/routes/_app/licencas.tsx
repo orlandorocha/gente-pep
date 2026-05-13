@@ -32,6 +32,17 @@ function LicencasPage() {
   const [q, setQ] = useState("");
   const [tipoFilter, setTipoFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [areaFilter, setAreaFilter] = useState("all");
+  const [turnoFilter, setTurnoFilter] = useState("all");
+
+  const areasDisponiveis = useMemo(
+    () => Array.from(new Set(colabs.map((c) => c.area).filter(Boolean))).sort(),
+    [colabs],
+  );
+  const turnosDisponiveis = useMemo(
+    () => Array.from(new Set(colabs.map((c) => c.turno).filter(Boolean))).sort(),
+    [colabs],
+  );
 
   const filteredLicencas = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -43,9 +54,11 @@ function LicencasPage() {
         .includes(term);
       const matchesTipo = tipoFilter === "all" || l.tipo === tipoFilter;
       const matchesStatus = statusFilter === "all" || l.status === statusFilter;
-      return matchesText && matchesTipo && matchesStatus;
+      const matchesArea = areaFilter === "all" || c?.area === areaFilter;
+      const matchesTurno = turnoFilter === "all" || c?.turno === turnoFilter;
+      return matchesText && matchesTipo && matchesStatus && matchesArea && matchesTurno;
     });
-  }, [licencas, colMap, q, tipoFilter, statusFilter]);
+  }, [licencas, colMap, q, tipoFilter, statusFilter, areaFilter, turnoFilter]);
 
   const { paged, page, setPage, pageSize, setPageSize, total, totalPages } = usePagination(filteredLicencas, 10);
 
@@ -73,6 +86,20 @@ function LicencasPage() {
             <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="all">Todos</option>
               {(["Ativa","Encerrada","Cancelada"] as const).map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+          </div>
+          <div className="w-[220px] space-y-2">
+            <Label>Área</Label>
+            <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}>
+              <option value="all">Todas</option>
+              {areasDisponiveis.map((area) => <option key={area} value={area}>{area}</option>)}
+            </select>
+          </div>
+          <div className="w-[220px] space-y-2">
+            <Label>Turno</Label>
+            <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={turnoFilter} onChange={(e) => setTurnoFilter(e.target.value)}>
+              <option value="all">Todos</option>
+              {turnosDisponiveis.map((turno) => <option key={turno} value={turno}>{turno}</option>)}
             </select>
           </div>
         </div>

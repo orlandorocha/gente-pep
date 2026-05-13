@@ -61,6 +61,80 @@ function getStatusAtualizado(status: FeriasRow["status"], inicio: string, fim: s
   return status;
 }
 
+async function solicitarFeriasManual({
+  colaboradorId,
+  inicio,
+  fim,
+  periodoAquisitivo,
+}: {
+  colaboradorId: string;
+  inicio: string;
+  fim: string;
+  periodoAquisitivo: string;
+}) {
+  const { data: colab, error: colabError } = await supabase
+    .from("colaboradores")
+    .select("id, nome, gpid, gestor_id")
+    .eq("id", colaboradorId)
+    .maybeSingle();
+
+  if (colabError || !colab) {
+    throw new Error("Colaborador não encontrado");
+  }
+
+  const { data: existente, error: duplicateError } = await supabase
+    .from("ferias")
+    .select("id")
+    .eq("colaborador_id", colaboradorId)
+    .eq("inicio", inicio)
+    .eq("fim", fim)
+    .maybeSingle();
+
+  if (duplicateError) throw new Error(duplicateError.message);
+  if (existente) {
+    throw new Error(`Já existe uma solicitação de férias para ${colab.nome} (${colab.gpid}) nesse mesmo período.`);
+  }
+
+  const { data: ferias, error: insertError } = await supabase
+    .from("ferias")
+    .insert({
+      colaborador_id: colaboradorId,
+      gestor_id: colab.gestor_id,
+      inicio,
+      fim,
+      periodo_aquisitivo: periodoAquisitivo,
+      status: "Pendente",
+    })
+    .select("id, token_aprovacao")
+    .single();
+
+  if (insertError) throw new Error(insertError.message);
+
+  if (!colab.gestor_id) {
+    return { id: ferias.id, notify: { skipped: "Colaborador sem gestor cadastrado" } };
+  }
+
+  const { data: gestor, error: gestorError } = await supabase
+    .from("gestores")
+    .select("nome, email, teams_user_id")
+    .eq("id", colab.gestor_id)
+    .maybeSingle();
+
+  if (gestorError) throw new Error(gestorError.message);
+  if (!gestor) {
+    return { id: ferias.id, notify: { skipped: "Gestor não encontrado" } };
+  }
+
+  return {
+    id: ferias.id,
+    colaboradorNome: colab.nome,
+    gestorNome: gestor.nome,
+    gestorEmail: gestor.email,
+    gestorTeamsUserId: gestor.teams_user_id,
+    token: ferias.token_aprovacao,
+  };
+}
+
 async function registrarFaltaFeriasDoDia(colaboradorId: string) {
   const hoje = todayISO();
   const { error } = await supabase.from("faltas").insert({
@@ -516,7 +590,21 @@ function FeriasForm({
       }
       setSubmitting(true);
       try {
-        const r = await solicitar({ data: { colaboradorId, inicio, fim, periodoAquisitivo } });
+        const created = await solicitarFeriasManual({ colaboradorId, inicio, fim, periodoAquisitivo });
+        const r = "gestorEmail" in created
+          ? await solicitar({
+            data: {
+              colaboradorNome: created.colaboradorNome,
+              gestorNome: created.gestorNome,
+              gestorEmail: created.gestorEmail,
+              gestorTeamsUserId: created.gestorTeamsUserId,
+              inicio,
+              fim,
+              periodoAquisitivo,
+              token: created.token,
+            },
+          })
+          : { notify: created.notify };
         const okEmail = r.notify?.email?.ok;
         const okTeams = r.notify?.teams?.ok;
         const canais = [okEmail && "email", okTeams && "Teams"].filter(Boolean).join(" + ");

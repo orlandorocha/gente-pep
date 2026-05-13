@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Plus, Search } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card } from "@/components/ui/card";
@@ -21,7 +21,7 @@ import { AREAS } from "@/data/areas";
 import { RowActions } from "@/components/RowActions";
 import { EditSheet } from "@/components/forms/FormSheet";
 import { GestoresModal } from "@/components/GestoresModal";
-import { ImportColaboradoresButton } from "@/components/ImportColaboradoresButton";
+import { ExportColaboradoresButton, ImportColaboradoresButton } from "@/components/ImportColaboradoresButton";
 import { DataPagination, usePagination } from "@/components/DataPagination";
 import { toast } from "sonner";
 
@@ -33,14 +33,31 @@ function ColaboradoresPage() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ColaboradorRow | null>(null);
+  const [areaFilter, setAreaFilter] = useState("all");
+  const [turnoFilter, setTurnoFilter] = useState("all");
   const { data: colaboradores, reload } = useColaboradores();
   const gestores = useGestores();
   const reloadGestores = (gestores as any).reload as () => Promise<void>;
   const gestorMap = new Map(gestores.map((g) => [g.id, g.nome]));
 
-  const list = colaboradores.filter((c) =>
-    [c.nome, c.email, c.gpid, c.area, c.cargo].join(" ").toLowerCase().includes(q.toLowerCase()),
+  const areasDisponiveis = useMemo(
+    () => Array.from(new Set(colaboradores.map((c) => c.area).filter(Boolean))).sort(),
+    [colaboradores],
   );
+  const turnosDisponiveis = useMemo(
+    () => Array.from(new Set(colaboradores.map((c) => c.turno).filter(Boolean))).sort(),
+    [colaboradores],
+  );
+
+  const list = colaboradores.filter((c) => {
+    const matchesText = [c.nome, c.email, c.gpid, c.area, c.turno, c.cargo]
+      .join(" ")
+      .toLowerCase()
+      .includes(q.toLowerCase());
+    const matchesArea = areaFilter === "all" || c.area === areaFilter;
+    const matchesTurno = turnoFilter === "all" || c.turno === turnoFilter;
+    return matchesText && matchesArea && matchesTurno;
+  });
   const { paged, page, setPage, pageSize, setPageSize, total, totalPages } = usePagination(list, 10);
 
   return (
@@ -51,6 +68,7 @@ function ColaboradoresPage() {
         actions={
           <div className="flex items-center gap-2">
             <ImportColaboradoresButton gestores={gestores} onDone={reload} />
+            <ExportColaboradoresButton colaboradores={list} area={areaFilter} turno={turnoFilter} />
             <GestoresModal gestores={gestores} onChanged={reloadGestores} />
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
@@ -66,9 +84,25 @@ function ColaboradoresPage() {
       />
 
       <Card className="p-4">
-        <div className="relative mb-4 max-w-sm">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Buscar por nome, GPID, área..." className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <div className="relative min-w-[260px] flex-1 max-w-sm">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Buscar por nome, GPID, área..." className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <div className="w-[220px] space-y-2">
+            <Label>Área</Label>
+            <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}>
+              <option value="all">Todas</option>
+              {areasDisponiveis.map((area) => <option key={area} value={area}>{area}</option>)}
+            </select>
+          </div>
+          <div className="w-[220px] space-y-2">
+            <Label>Turno</Label>
+            <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={turnoFilter} onChange={(e) => setTurnoFilter(e.target.value)}>
+              <option value="all">Todos</option>
+              {turnosDisponiveis.map((turno) => <option key={turno} value={turno}>{turno}</option>)}
+            </select>
+          </div>
         </div>
 
         <div className="overflow-hidden rounded-md border">

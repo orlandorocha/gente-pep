@@ -1,5 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/integrations/custom-supabase/client.server";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { Database } from "@/integrations/supabase/types";
 import { formatLocalDateISO } from "@/lib/utils";
 
 const todayISO = () => formatLocalDateISO();
@@ -37,6 +40,8 @@ function bumpAquisitivo(pa: string) {
   return `${Number(m[1]) + 1}/${Number(m[2]) + 1}`;
 }
 
+type DbClient = SupabaseClient<Database>;
+
 /**
  * Registro automático diário de Faltas a partir de:
  *  - Férias com status "Em gozo" cujo período inclui hoje
@@ -48,25 +53,25 @@ function bumpAquisitivo(pa: string) {
  *
  * Idempotente: o índice único (colaborador_id, data, motivo) impede duplicatas.
  */
-export async function sincronizarFaltasDiaAtual() {
+async function sincronizarFaltasDiaAtualComClient(db: DbClient) {
   const hoje = todayISO();
   const summary = { promovidas: 0, concluidas: 0, reagendadas: 0, faltasFerias: 0, faltasLicenca: 0, faltasAgendamento: 0 };
 
   // 1. Promove Aprovada → Em gozo
-  const { data: aprovadas } = await supabaseAdmin
+  const { data: aprovadas } = await db
     .from("ferias").select("id")
     .eq("status", "Aprovada").lte("inicio", hoje).gte("fim", hoje);
   for (const v of aprovadas ?? []) {
-    await supabaseAdmin.from("ferias").update({ status: "Em gozo" }).eq("id", v.id);
+    await db.from("ferias").update({ status: "Em gozo" }).eq("id", v.id);
     summary.promovidas++;
   }
 
   // 2. Conclui férias encerradas e agenda o próximo ciclo
-  const { data: encerradas } = await supabaseAdmin
+  const { data: encerradas } = await db
     .from("ferias").select("id, colaborador_id, gestor_id, inicio, fim, periodo_aquisitivo, status")
     .in("status", ["Em gozo", "Aprovada"]).lt("fim", hoje);
   for (const v of encerradas ?? []) {
-    await supabaseAdmin.from("ferias").update({ status: "Concluída" }).eq("id", v.id);
+    await db.from("ferias").update({ status: "Concluída" }).eq("id", v.id);
     summary.concluidas++;
 
     const duracao = diffDays(parseISO(v.fim), parseISO(v.inicio));
@@ -74,7 +79,7 @@ export async function sincronizarFaltasDiaAtual() {
     const novoFim = addDays(novoInicio, duracao);
     const novoPeriodoAquisitivo = bumpAquisitivo(v.periodo_aquisitivo);
 
-    const { data: existente } = await supabaseAdmin
+    const { data: existente } = await db
       .from("ferias")
       .select("id")
       .eq("colaborador_id", v.colaborador_id)
@@ -84,7 +89,7 @@ export async function sincronizarFaltasDiaAtual() {
       .maybeSingle();
 
     if (!existente) {
-      const { error: insertError } = await supabaseAdmin.from("ferias").insert({
+      const { error: insertError } = await db.from("ferias").insert({
         colaborador_id: v.colaborador_id,
         gestor_id: v.gestor_id,
         inicio: toISO(novoInicio),
@@ -98,11 +103,11 @@ export async function sincronizarFaltasDiaAtual() {
 
   // 3. Faltas a partir de Férias em curso hoje.
   // Inclui "Aprovada" para não depender apenas da promoção de status acontecer antes.
-  const { data: emGozo } = await supabaseAdmin
+  const { data: emGozo } = await db
     .from("ferias").select("colaborador_id")
     .in("status", ["Em gozo", "Aprovada"]).lte("inicio", hoje).gte("fim", hoje);
   for (const f of emGozo ?? []) {
-    const { error } = await supabaseAdmin.from("faltas").insert({
+    const { error } = await db.from("faltas").insert({
       colaborador_id: f.colaborador_id, data: hoje,
       motivo: MOTIVO_FERIAS, periodo: "Integral",
       observacao: "Registrado automaticamente (Em gozo)",
@@ -111,12 +116,12 @@ export async function sincronizarFaltasDiaAtual() {
   }
 
   // 4. Faltas a partir de Licenças Ativas
-  const { data: licencas } = await supabaseAdmin
+  const { data: licencas } = await db
     .from("licencas").select("colaborador_id, tipo")
     .eq("status", "Ativa").lte("inicio", hoje).gte("fim", hoje);
   for (const l of licencas ?? []) {
     const motivo = motivoLicenca(l.tipo);
-    const { error } = await supabaseAdmin.from("faltas").insert({
+    const { error } = await db.from("faltas").insert({
       colaborador_id: l.colaborador_id, data: hoje,
       motivo, periodo: "Integral",
       observacao: `Registrado automaticamente (Licença ${l.tipo})`,
@@ -125,7 +130,7 @@ export async function sincronizarFaltasDiaAtual() {
   }
 
   // 5. Faltas a partir de Agendamentos do dia
-  const { data: agendamentos } = await supabaseAdmin
+  const { data: agendamentos } = await db
     .from("agendamentos")
     .select("colaborador_id, tipo, titulo, hora")
     .eq("data", hoje)
@@ -135,7 +140,7 @@ export async function sincronizarFaltasDiaAtual() {
     const titulo = a.titulo?.trim();
     const hora = a.hora?.slice(0, 5);
     const detalhe = [titulo, hora].filter(Boolean).join(" às ");
-    const { error } = await supabaseAdmin.from("faltas").insert({
+    const { error } = await db.from("faltas").insert({
       colaborador_id: a.colaborador_id,
       data: hoje,
       motivo,
@@ -150,5 +155,10 @@ export async function sincronizarFaltasDiaAtual() {
   return summary;
 }
 
+export async function sincronizarFaltasDiaAtual() {
+  return sincronizarFaltasDiaAtualComClient(supabaseAdmin);
+}
+
 export const sincronizarFaltasDoDia = createServerFn({ method: "POST" })
-  .handler(async () => sincronizarFaltasDiaAtual());
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => sincronizarFaltasDiaAtualComClient(context.supabase));

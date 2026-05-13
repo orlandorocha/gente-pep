@@ -5,74 +5,31 @@ import { notifyVacationRequest } from "./notifications.server";
 import { sincronizarFaltasDiaAtual } from "./sync.functions";
 
 const SolicitarSchema = z.object({
-  colaboradorId: z.string().uuid(),
+  colaboradorNome: z.string().min(1),
+  gestorNome: z.string().min(1),
+  gestorEmail: z.string().email(),
+  gestorTeamsUserId: z.string().nullable().optional(),
   inicio: z.string().min(10).max(10),
   fim: z.string().min(10).max(10),
   periodoAquisitivo: z.string().min(4).max(20),
+  token: z.string().uuid(),
 });
 
 export const solicitarFerias = createServerFn({ method: "POST" })
   .inputValidator((d) => SolicitarSchema.parse(d))
   .handler(async ({ data }) => {
-    const { data: colab, error: cErr } = await supabaseAdmin
-      .from("colaboradores")
-      .select("id, nome, gpid, gestor_id")
-      .eq("id", data.colaboradorId)
-      .maybeSingle();
-    if (cErr || !colab) throw new Error("Colaborador não encontrado");
+    const notify = await notifyVacationRequest({
+      colaboradorNome: data.colaboradorNome,
+      gestorNome: data.gestorNome,
+      gestorEmail: data.gestorEmail,
+      gestorTeamsUserId: data.gestorTeamsUserId,
+      inicio: data.inicio,
+      fim: data.fim,
+      periodoAquisitivo: data.periodoAquisitivo,
+      token: data.token,
+    });
 
-    const { data: existente, error: duplicateError } = await supabaseAdmin
-      .from("ferias")
-      .select("id")
-      .eq("colaborador_id", data.colaboradorId)
-      .eq("inicio", data.inicio)
-      .eq("fim", data.fim)
-      .maybeSingle();
-    if (duplicateError) throw new Error(duplicateError.message);
-    if (existente) {
-      throw new Error(`Já existe uma solicitação de férias para ${colab.nome} (${colab.gpid}) nesse mesmo período.`);
-    }
-
-    const { data: ferias, error } = await supabaseAdmin
-      .from("ferias")
-      .insert({
-        colaborador_id: data.colaboradorId,
-        gestor_id: colab.gestor_id,
-        inicio: data.inicio,
-        fim: data.fim,
-        periodo_aquisitivo: data.periodoAquisitivo,
-        status: "Pendente",
-      })
-      .select("id, token_aprovacao")
-      .single();
-    if (error) throw new Error(error.message);
-
-    let notify: { email?: any; teams?: any; skipped?: string } = {};
-    if (colab.gestor_id) {
-      const { data: gestor } = await supabaseAdmin
-        .from("gestores")
-        .select("nome, email, teams_user_id")
-        .eq("id", colab.gestor_id)
-        .maybeSingle();
-      if (gestor) {
-        notify = await notifyVacationRequest({
-          colaboradorNome: colab.nome,
-          gestorNome: gestor.nome,
-          gestorEmail: gestor.email,
-          gestorTeamsUserId: gestor.teams_user_id,
-          inicio: data.inicio,
-          fim: data.fim,
-          periodoAquisitivo: data.periodoAquisitivo,
-          token: ferias.token_aprovacao,
-        });
-      } else {
-        notify.skipped = "Gestor não encontrado";
-      }
-    } else {
-      notify.skipped = "Colaborador sem gestor cadastrado";
-    }
-
-    return { id: ferias.id, notify };
+    return { ok: true, notify };
   });
 
 const DecideSchema = z.object({

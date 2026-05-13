@@ -1,9 +1,9 @@
 import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Upload } from "lucide-react";
+import { Download, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { readXlsxRows } from "@/lib/xlsx-utils";
+import { downloadXlsx, readXlsxRows } from "@/lib/xlsx-utils";
 import { supabase } from "@/integrations/custom-supabase/client";
 import { CARGOS } from "@/data/cargos";
 import { AREAS } from "@/data/areas";
@@ -77,6 +77,50 @@ function mergeImportRow(row: ImportRow, existing?: ExistingImportRow) {
       ? (row.gestorMatched ? row.gestor_id : existing.gestor_id ?? null)
       : (existing.gestor_id ?? null),
   };
+}
+
+function normalizeToken(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function ExportColaboradoresButton({
+  colaboradores,
+  area,
+  turno,
+}: {
+  colaboradores: Pick<ColaboradorRow, "gpid" | "nome" | "turno" | "area" | "status">[];
+  area: string;
+  turno: string;
+}) {
+  function exportar() {
+    const rows = colaboradores.map((colaborador) => ({
+      GPID: colaborador.gpid,
+      Colaborador: colaborador.nome,
+      Turno: colaborador.turno,
+      Área: colaborador.area,
+      Status: colaborador.status,
+    }));
+
+    const suffixParts = [
+      area !== "all" ? normalizeToken(area) : "",
+      turno !== "all" ? normalizeToken(turno) : "",
+    ].filter(Boolean);
+    const suffix = suffixParts.length ? `-${suffixParts.join("-")}` : "";
+
+    downloadXlsx(rows, "Colaboradores", `colaboradores${suffix}.xlsx`);
+    toast.success(`${rows.length} colaborador(es) exportado(s)`);
+  }
+
+  return (
+    <Button variant="outline" size="sm" onClick={exportar} disabled={colaboradores.length === 0}>
+      <Download className="h-4 w-4 mr-1" />Exportar XLSX
+    </Button>
+  );
 }
 
 export function ImportColaboradoresButton({

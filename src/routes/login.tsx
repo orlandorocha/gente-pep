@@ -1,6 +1,6 @@
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { ShieldCheck, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ensureAuthSessionReady, supabase } from "@/integrations/custom-supabase/client";
+import { BrandLogo } from "@/components/BrandLogo";
 import { toast } from "sonner";
 
 const ADMIN_ACCESS_EMAIL = import.meta.env.VITE_ADMIN_ACCESS_EMAIL?.trim().toLowerCase() ?? "";
@@ -89,20 +90,17 @@ function LoginPage() {
   };
 
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
+    <div className="grid min-h-screen bg-slate-50 lg:grid-cols-[minmax(0,1.1fr)_minmax(480px,0.9fr)]">
       <div
-        className="hidden flex-col justify-between p-12 text-primary-foreground lg:flex"
+        className="hidden flex-col justify-between p-12 text-primary-foreground lg:flex xl:p-16"
         style={{ background: "var(--gradient-primary)" }}
       >
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/15 backdrop-blur">
-            <ShieldCheck className="h-6 w-6" />
-          </div>
-          <span className="text-lg font-semibold">Guardião de Gente</span>
+        <div className="flex items-center">
+          <BrandLogo imageClassName="h-14 w-auto object-contain" alt="PepsiCo" />
         </div>
         <div className="space-y-4">
           <h1 className="text-4xl font-semibold leading-tight">
-            Gestão de pessoas, em um só lugar.
+            Guardiões de Gente.
           </h1>
           <p className="max-w-md text-base text-primary-foreground/85">
             Acompanhe absenteísmo, férias, licenças e tarefas operacionais com a clareza
@@ -114,16 +112,20 @@ function LoginPage() {
         </div>
       </div>
 
-      <div className="flex items-center justify-center bg-background p-6 md:p-12">
-        <Card className="w-full max-w-md border-none shadow-none">
-          <CardContent className="p-0">
-            <div className="mb-8">
+      <div className="flex items-center justify-center bg-background px-6 py-10 md:px-10 lg:px-14">
+        <div className="w-full max-w-md">
+          <div className="mb-8 flex justify-center lg:hidden">
+            <BrandLogo imageClassName="h-14 w-auto object-contain" alt="PepsiCo" />
+          </div>
+          <Card className="w-full border border-slate-200/80 bg-white shadow-xl shadow-slate-200/50">
+            <CardContent className="p-6 sm:p-8">
+            <div className="mb-8 text-left">
               <h2 className="text-2xl font-semibold tracking-tight">
                 {mode === "login" ? "Acesso corporativo" : "Criar acesso"}
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
                 {mode === "login"
-                  ? "Entre com seu e-mail corporativo e senha."
+                  ? "Entre com seu e-mail corporativo e gpid."
                   : "Cadastre-se com seu e-mail e GPID."}
               </p>
             </div>
@@ -150,7 +152,7 @@ function LoginPage() {
               )}
 
               <div className="space-y-2">
-                <Label htmlFor="password">Senha</Label>
+                <Label htmlFor="password">Gpid</Label>
                 <Input
                   id="password" type="password" required minLength={6}
                   value={password} onChange={(e) => setPassword(e.target.value)}
@@ -183,8 +185,9 @@ function LoginPage() {
                 Recuperar acesso
               </Link>
             </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
 
         <Dialog open={createAccessOpen} onOpenChange={setCreateAccessOpen}>
           <DialogContent>

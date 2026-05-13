@@ -5,8 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { supabase } from "@/integrations/custom-supabase/client";
+import { BrandLogo } from "@/components/BrandLogo";
 import { toast } from "sonner";
-import { ShieldCheck } from "lucide-react";
 
 export const Route = createFileRoute("/recuperar")({
   component: RecuperarPage,
@@ -29,12 +29,10 @@ function RecuperarPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md border border-slate-200/80 bg-white shadow-xl shadow-slate-200/50">
         <CardContent className="p-8">
           <div className="mb-6 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <ShieldCheck className="h-5 w-5" />
-            </div>
+            <BrandLogo imageClassName="h-14 w-auto object-contain" alt="PepsiCo" />
             <div>
               <h1 className="text-lg font-semibold">Recuperar acesso</h1>
               <p className="text-xs text-muted-foreground">Enviaremos um link para seu e-mail.</p>

@@ -1,13 +1,14 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Users, CalendarX, Plane, FileHeart,
-  CalendarClock, BellRing, ListChecks, ShieldCheck,
+  CalendarClock, BellRing, ListChecks,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarHeader, SidebarFooter,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { BrandLogo } from "@/components/BrandLogo";
 
 const items = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -29,13 +30,10 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r-0">
       <SidebarHeader className="border-b border-sidebar-border">
         <div className="flex items-center gap-2 px-2 py-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground shadow-md">
-            <ShieldCheck className="h-5 w-5" />
-          </div>
+          <BrandLogo className="shrink-0" imageClassName={collapsed ? "h-9 w-9 rounded-md object-cover" : "h-9 w-auto object-contain"} />
           {!collapsed && (
-            <div className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold text-sidebar-foreground">Guardião</span>
-              <span className="text-[11px] text-sidebar-foreground/60">de Gente</span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs text-sidebar-foreground/60">Guardião de Gente</p>
             </div>
           )}
         </div>

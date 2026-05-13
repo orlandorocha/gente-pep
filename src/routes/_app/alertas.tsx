@@ -24,6 +24,8 @@ type Alerta = {
   data: string;
   acao: string;
   icon: typeof AlertTriangle;
+  area?: string | null;
+  turno?: string | null;
 };
 
 function AlertasPage() {
@@ -35,6 +37,17 @@ function AlertasPage() {
   const [q, setQ] = useState("");
   const [tipoFilter, setTipoFilter] = useState("all");
   const [criticidadeFilter, setCriticidadeFilter] = useState("all");
+  const [areaFilter, setAreaFilter] = useState("all");
+  const [turnoFilter, setTurnoFilter] = useState("all");
+
+  const areasDisponiveis = useMemo(
+    () => Array.from(new Set(colabs.map((c) => c.area).filter(Boolean))).sort(),
+    [colabs],
+  );
+  const turnosDisponiveis = useMemo(
+    () => Array.from(new Set(colabs.map((c) => c.turno).filter(Boolean))).sort(),
+    [colabs],
+  );
 
   const alertas = useMemo<Alerta[]>(() => {
     const out: Alerta[] = [];
@@ -57,6 +70,8 @@ function AlertasPage() {
         data: hoje,
         acao: "Abrir registro",
         icon: CalendarX,
+        area: c?.area ?? null,
+        turno: c?.turno ?? null,
       });
     });
 
@@ -70,6 +85,8 @@ function AlertasPage() {
       data: t.prazo!,
       acao: "Ver tarefa",
       icon: ClipboardList,
+      area: null,
+      turno: null,
     }));
 
     // Férias pendentes há mais de 5 dias
@@ -85,6 +102,8 @@ function AlertasPage() {
         data: f.inicio,
         acao: "Aprovar agora",
         icon: Plane,
+        area: c?.area ?? null,
+        turno: c?.turno ?? null,
       });
     });
 
@@ -98,15 +117,17 @@ function AlertasPage() {
   const filteredAlertas = useMemo(() => {
     const term = q.trim().toLowerCase();
     return alertas.filter((alerta) => {
-      const matchesText = !term || [alerta.tipo, alerta.mensagem, alerta.acao, alerta.data]
+      const matchesText = !term || [alerta.tipo, alerta.mensagem, alerta.acao, alerta.data, alerta.area, alerta.turno]
         .join(" ")
         .toLowerCase()
         .includes(term);
       const matchesTipo = tipoFilter === "all" || alerta.tipo === tipoFilter;
       const matchesCriticidade = criticidadeFilter === "all" || alerta.criticidade === criticidadeFilter;
-      return matchesText && matchesTipo && matchesCriticidade;
+      const matchesArea = areaFilter === "all" || alerta.area === areaFilter;
+      const matchesTurno = turnoFilter === "all" || alerta.turno === turnoFilter;
+      return matchesText && matchesTipo && matchesCriticidade && matchesArea && matchesTurno;
     });
-  }, [alertas, q, tipoFilter, criticidadeFilter]);
+  }, [alertas, q, tipoFilter, criticidadeFilter, areaFilter, turnoFilter]);
 
   const { paged, page, setPage, pageSize, setPageSize, total, totalPages } = usePagination(filteredAlertas, 10);
 
@@ -134,6 +155,20 @@ function AlertasPage() {
             <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={criticidadeFilter} onChange={(e) => setCriticidadeFilter(e.target.value)}>
               <option value="all">Todas</option>
               {(["Alta","Média","Baixa"] as const).map((criticidade) => <option key={criticidade} value={criticidade}>{criticidade}</option>)}
+            </select>
+          </div>
+          <div className="w-[220px] space-y-2">
+            <Label>Área</Label>
+            <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}>
+              <option value="all">Todas</option>
+              {areasDisponiveis.map((area) => <option key={area} value={area}>{area}</option>)}
+            </select>
+          </div>
+          <div className="w-[220px] space-y-2">
+            <Label>Turno</Label>
+            <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={turnoFilter} onChange={(e) => setTurnoFilter(e.target.value)}>
+              <option value="all">Todos</option>
+              {turnosDisponiveis.map((turno) => <option key={turno} value={turno}>{turno}</option>)}
             </select>
           </div>
         </div>

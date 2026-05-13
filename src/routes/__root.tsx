@@ -2,15 +2,7 @@ import { Outlet, Link, createRootRoute, HeadContent, Scripts } from "@tanstack/r
 import { Toaster } from "@/components/ui/sonner";
 
 import appCss from "../styles.css?url";
-
-const faviconHref = `data:image/svg+xml;utf8,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-    <rect width="64" height="64" rx="14" fill="#0f172a"/>
-    <path d="M32 14 47 20v11c0 10.5-6.4 19.6-15 23-8.6-3.4-15-12.5-15-23V20l15-6Z" fill="#f59e0b"/>
-    <path d="M25 34h14" stroke="#0f172a" stroke-width="4" stroke-linecap="round"/>
-    <path d="M32 27v14" stroke="#0f172a" stroke-width="4" stroke-linecap="round"/>
-  </svg>`,
-)}`;
+import pepLogo from "../../img/pep-logo.png";
 
 function NotFoundComponent() {
   return (
@@ -52,7 +44,7 @@ export const Route = createRootRoute({
       },
       {
         rel: "icon",
-        href: faviconHref,
+        href: pepLogo,
       },
     ],
   }),

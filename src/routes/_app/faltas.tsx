@@ -51,16 +51,28 @@ function FaltasPage() {
   const colMap = useMemo(() => new Map(colabs.map((c) => [c.id, c])), [colabs]);
   const [editing, setEditing] = useState<FaltaRow | null>(null);
   const [q, setQ] = useState("");
+  const [areaFilter, setAreaFilter] = useState("all");
+  const [turnoFilter, setTurnoFilter] = useState("all");
+
+  const areasDisponiveis = useMemo(
+    () => Array.from(new Set(colabs.map((c) => c.area).filter(Boolean))).sort(),
+    [colabs],
+  );
+  const turnosDisponiveis = useMemo(
+    () => Array.from(new Set(colabs.map((c) => c.turno).filter(Boolean))).sort(),
+    [colabs],
+  );
 
   const filteredFaltas = useMemo(() => {
     const term = q.trim().toLowerCase();
     return faltas.filter((f) => {
       const c = colMap.get(f.colaborador_id);
-      return !term || [
+      const matchesText = !term || [
         f.data,
         c?.nome,
         c?.gpid,
         c?.area,
+        c?.turno,
         f.motivo,
         f.periodo,
         f.observacao,
@@ -68,8 +80,11 @@ function FaltasPage() {
         .join(" ")
         .toLowerCase()
         .includes(term);
+      const matchesArea = areaFilter === "all" || c?.area === areaFilter;
+      const matchesTurno = turnoFilter === "all" || c?.turno === turnoFilter;
+      return matchesText && matchesArea && matchesTurno;
     });
-  }, [faltas, colMap, q]);
+  }, [faltas, colMap, q, areaFilter, turnoFilter]);
 
   const { paged, page, setPage, pageSize, setPageSize, total, totalPages } = usePagination(filteredFaltas, 10);
 
@@ -81,7 +96,7 @@ function FaltasPage() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <ImportFaltasButton colabs={colabs as any} onDone={reload} />
-            <ExportFaltasButton faltas={faltas as any} colabs={colabs as any} />
+            <ExportFaltasButton faltas={filteredFaltas as any} colabs={colabs as any} />
             <EmailGestoresButton />
             <FormSheet triggerLabel="Registrar ausência" title="Registrar ausência">
               {(close) => <FaltaForm colabs={colabs} onSaved={() => { reload(); close(); }} />}
@@ -90,13 +105,29 @@ function FaltasPage() {
         }
       />
       <Card className="p-4">
-        <div className="mb-4 min-w-[260px] space-y-2">
-          <Label>Buscar</Label>
-          <Input
-            placeholder="Buscar por colaborador, GPID, área, motivo..."
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <div className="min-w-[260px] flex-1 space-y-2">
+            <Label>Buscar</Label>
+            <Input
+              placeholder="Buscar por colaborador, GPID, área, motivo..."
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <div className="w-[220px] space-y-2">
+            <Label>Área</Label>
+            <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}>
+              <option value="all">Todas</option>
+              {areasDisponiveis.map((area) => <option key={area} value={area}>{area}</option>)}
+            </select>
+          </div>
+          <div className="w-[220px] space-y-2">
+            <Label>Turno</Label>
+            <select className="w-full rounded-md border bg-background px-3 py-2 text-sm" value={turnoFilter} onChange={(e) => setTurnoFilter(e.target.value)}>
+              <option value="all">Todos</option>
+              {turnosDisponiveis.map((turno) => <option key={turno} value={turno}>{turno}</option>)}
+            </select>
+          </div>
         </div>
         <div className="overflow-hidden rounded-md border">
           <Table>
