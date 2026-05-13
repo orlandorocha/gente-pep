@@ -100,7 +100,7 @@ function LoginPage() {
         </div>
         <div className="space-y-4">
           <h1 className="text-4xl font-semibold leading-tight">
-            Guardiões de Gente.
+            Guardião de Gente.
           </h1>
           <p className="max-w-md text-base text-primary-foreground/85">
             Acompanhe absenteísmo, férias, licenças e tarefas operacionais com a clareza
