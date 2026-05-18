@@ -56,8 +56,16 @@ function AlertasPage() {
     const cutoffISO = cutoff.toISOString().slice(0, 10);
 
     // Absenteísmo elevado por colaborador (últimos 30 dias)
+    const motivosAbsenteismo = new Set([
+      "Falta",
+      "Atraso",
+      "Atestado médico",
+      "Falta injustificada",
+      "Falta justificada",
+      "Afastamento Médico",
+    ]);
     const porColab: Record<string, number> = {};
-    faltas.filter(f => f.data >= cutoffISO).forEach(f => {
+    faltas.filter(f => f.data >= cutoffISO && motivosAbsenteismo.has(f.motivo)).forEach(f => {
       porColab[f.colaborador_id] = (porColab[f.colaborador_id] ?? 0) + 1;
     });
     Object.entries(porColab).filter(([_, n]) => n >= 3).forEach(([id, n]) => {
@@ -65,7 +73,7 @@ function AlertasPage() {
       out.push({
         id: `falta-${id}`,
         tipo: "Absenteísmo elevado",
-        mensagem: `${c?.nome ?? "Colaborador"} (${c?.area ?? "—"}) acumulou ${n} faltas nos últimos 30 dias`,
+        mensagem: `${c?.nome ?? "Colaborador"} (${c?.area ?? "—"}) acumulou ${n} ocorrências de faltas nos últimos 30 dias`,
         criticidade: n >= 5 ? "Alta" : "Média",
         data: hoje,
         acao: "Abrir registro",

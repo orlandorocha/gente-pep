@@ -14,11 +14,90 @@ import { formatDateBr } from "@/lib/date";
 type Colab = { id: string; nome: string; gpid: string; area: string; turno: string; gestor_id?: string | null };
 type Falta = { id: string; colaborador_id: string; data: string; motivo: string; periodo: string };
 type Ferias = { id: string; colaborador_id: string; inicio: string; fim: string; periodo_aquisitivo: string; status: string };
+type FaltaImportRow = {
+  line: number;
+  record: {
+    colaborador_id: string;
+    data: string;
+    motivo: string;
+    periodo: string;
+    observacao: string;
+  };
+};
 
 function chunk<T>(items: T[], size: number) {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
+}
+
+function normalizeToken(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeFaltaMotivo(value: string) {
+  const normalized = normalizeToken(value);
+  if (!normalized) return "Falta";
+
+  const aliases: Record<string, string> = {
+    "falta": "Falta",
+    "falta injustificada": "Falta",
+    "falta justificada": "Falta",
+    "afastamento medico": "Afastamento Médico",
+    "atestado medico": "Afastamento Médico",
+    "licenca maternidade": "Licença Maternidade",
+    "lisenca maternidade": "Licença Maternidade",
+    "licenca paternidade": "Licença Paternidade",
+    "licenca paternidadade": "Licença Paternidade",
+  };
+
+  return aliases[normalized] ?? value.trim();
+}
+
+function normalizeFaltaPeriodo(value: string) {
+  const normalized = normalizeToken(value);
+  if (!normalized) return "Integral";
+
+  const aliases: Record<string, string> = {
+    integral: "Integral",
+    dia: "Integral",
+    "dia todo": "Integral",
+    manha: "Manhã",
+    tarde: "Tarde",
+    noite: "Noite",
+  };
+
+  return aliases[normalized] ?? value.trim();
+}
+
+async function upsertFaltasBatch(batch: FaltaImportRow[], erros: string[]) {
+  const records = batch.map((row) => row.record);
+  const { error } = await supabase
+    .from("faltas")
+    .upsert(records, { onConflict: "colaborador_id,data,motivo", ignoreDuplicates: false });
+
+  if (!error) return batch.length;
+
+  let ok = 0;
+  for (const row of batch) {
+    const { error: rowError } = await supabase
+      .from("faltas")
+      .upsert(row.record, { onConflict: "colaborador_id,data,motivo", ignoreDuplicates: false });
+
+    if (rowError) {
+      erros.push(`Linha ${row.line}: ${rowError.message}`);
+      continue;
+    }
+
+    ok += 1;
+  }
+
+  return ok;
 }
 
 /** Importa Faltas a partir de .xlsx (colunas: data, colaborador_id (nome ou GPID), motivo, periodo, observacao) */
@@ -30,30 +109,25 @@ export function ImportFaltasButton({ colabs, onDone }: { colabs: Colab[]; onDone
     setBusy(true);
     try {
       const rows = await readXlsxRows(file);
-      const inserts: any[] = []; const erros: string[] = [];
+      const inserts: FaltaImportRow[] = []; const erros: string[] = [];
       for (const [i, r] of rows.entries()) {
         const data = toISODate(r.data ?? r.Data);
-        const ref = String(r.colaborador_id ?? r.colaborador ?? r.Colaborador ?? "").trim();
-        const motivoRaw = String(r.motivo ?? r.Motivo ?? "Falta").trim();
-        const motivo = motivoRaw.localeCompare("Falta", "pt-BR", { sensitivity: "accent" }) === 0
-          || motivoRaw.localeCompare("Falta", "pt-BR", { sensitivity: "base" }) === 0
-          ? "Falta"
-          : motivoRaw;
-        const observacao = String(r.observacao ?? r.Observação ?? "").trim();
+        const ref = String(r.colaborador_id ?? r.colaborador ?? r.Colaborador ?? r.gpid ?? r.GPID ?? "").trim();
+        const motivo = normalizeFaltaMotivo(String(r.motivo ?? r.Motivo ?? "Falta"));
+        const observacao = String(r.observacao ?? r.Observacao ?? r.Observação ?? "").trim();
         if (!data) { erros.push(`Linha ${i + 2}: data inválida`); continue; }
         const c = findColaborador(colabs, ref);
         if (!c) { erros.push(`Linha ${i + 2}: colaborador "${ref}" não encontrado`); continue; }
-        const periodo = String(r.periodo ?? r.Período ?? c.turno ?? "Integral").trim();
-        inserts.push({ colaborador_id: c.id, data, motivo, periodo, observacao });
+        const periodo = normalizeFaltaPeriodo(String(r.periodo ?? r.Período ?? ""));
+        inserts.push({
+          line: i + 2,
+          record: { colaborador_id: c.id, data, motivo, periodo, observacao },
+        });
       }
-      const dedup = Array.from(new Map(inserts.map((r) => [`${r.colaborador_id}|${r.data}|${r.motivo}`, r])).values());
+      const dedup = Array.from(new Map(inserts.map((r) => [`${r.record.colaborador_id}|${r.record.data}|${r.record.motivo}`, r])).values());
       let ok = 0;
       for (const batch of chunk(dedup, 500)) {
-        const { error } = await supabase
-          .from("faltas")
-          .upsert(batch, { onConflict: "colaborador_id,data,motivo", ignoreDuplicates: false });
-        if (error) { erros.push(error.message); continue; }
-        ok += batch.length;
+        ok += await upsertFaltasBatch(batch, erros);
       }
       toast.success(`${ok} faltas importadas/atualizadas. ${erros.length} erros.`);
       if (erros.length) console.warn("Importação faltas — erros:", erros);

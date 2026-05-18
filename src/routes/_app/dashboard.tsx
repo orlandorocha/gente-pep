@@ -285,9 +285,16 @@ function Dashboard() {
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Sem dados</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={absenteismoPorArea}>
+                <BarChart data={absenteismoPorArea} margin={{ top: 10, right: 10, left: 0, bottom: 80 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                  <XAxis dataKey="area" stroke="var(--color-muted-foreground)" fontSize={12} />
+                  <XAxis
+                    dataKey="area"
+                    stroke="var(--color-muted-foreground)"
+                    fontSize={12}
+                    interval={0}
+                    tick={{ angle: -90, textAnchor: "end", dy: 10 }}
+                    height={80}
+                  />
                   <YAxis stroke="var(--color-muted-foreground)" fontSize={12} unit="%" />
                   <Tooltip contentStyle={{ background: "var(--color-card)", border: "1px solid var(--color-border)", borderRadius: 8 }} />
                   <Bar dataKey="taxa" fill="var(--color-chart-1)" radius={[6, 6, 0, 0]} />
