@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/custom-supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
 import { formatLocalDateISO } from "@/lib/utils";
+import { FeriasBriefingDialog } from "@/components/FeriasBriefingDialog";
 
 const titles: Record<string, { title: string; sub: string }> = {
   "/dashboard": { title: "Dashboard executivo", sub: "Visão consolidada de pessoas e operação" },
@@ -96,6 +97,7 @@ export function AppLayout() {
           </main>
         </div>
       </div>
+      <FeriasBriefingDialog user={user} />
     </SidebarProvider>
   );
 }

@@ -7,6 +7,13 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 import { nitro } from "nitro/vite";
 
+// The v0 sandbox proxy forwards external traffic to localhost:5173, so the dev
+// server MUST listen on 5173 in this environment. We only override when not
+// running inside the Lovable sandbox (which forces port 8080).
+const isLovableSandbox =
+	process.env.LOVABLE_SANDBOX === "1" ||
+	!!process.env.DEV_SERVER__PROJECT_PATH;
+
 export default defineConfig({
 	cloudflare: false,
 	plugins: [nitro({ preset: process.env.VERCEL ? "vercel" : undefined })],
@@ -14,5 +21,14 @@ export default defineConfig({
 		build: {
 			chunkSizeWarningLimit: 1000,
 		},
+		...(isLovableSandbox
+			? {}
+			: {
+					server: {
+						host: "0.0.0.0",
+						port: 5173,
+						strictPort: true,
+					},
+				}),
 	},
 });

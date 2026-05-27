@@ -1,5 +1,3 @@
-import pepLogo from "../../img/pep-logo.png";
-
 type BrandLogoProps = {
   className?: string;
   imageClassName?: string;
@@ -13,7 +11,7 @@ export function BrandLogo({
 }: BrandLogoProps) {
   return (
     <div className={className}>
-      <img src={pepLogo} alt={alt} className={imageClassName} />
+      <img src="/img/pep-logo.png" alt={alt} className={imageClassName} />
     </div>
   );
 }
