@@ -23,6 +23,13 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   AlertCircle,
   CheckCircle2,
   Edit3,
@@ -45,6 +52,8 @@ import type { GestorRow } from "@/hooks/useData";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FALLBACK_DOMAIN = "@guardiao-gente.local";
+const TURNOS = ["Manhã", "Tarde", "Noite"] as const;
+type Turno = (typeof TURNOS)[number];
 
 function normalizeNome(value: string) {
   return value.trim().toLocaleLowerCase("pt-BR");
@@ -65,6 +74,8 @@ type Row = {
   id?: string;
   nome: string;
   email: string;
+  setor?: string | null;
+  turno?: string | null;
   colaboradoresCount: number;
   isNew?: boolean;
   isEditing?: boolean;
@@ -75,9 +86,11 @@ type Row = {
 export function GestoresModal({
   gestores,
   onChanged,
+  onColaboradoresChanged,
 }: {
   gestores: GestorRow[];
   onChanged: () => void;
+  onColaboradoresChanged?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
@@ -87,13 +100,20 @@ export function GestoresModal({
   const [adding, setAdding] = useState(false);
   const [novoNome, setNovoNome] = useState("");
   const [novoEmail, setNovoEmail] = useState("");
+  const [novoSetor, setNovoSetor] = useState<string>("");
+  const [novoCargo, setNovoCargo] = useState<string>("");
+  const [novoTurno, setNovoTurno] = useState<Turno | "">("");
+  const [setoresDisponiveis, setSetoresDisponiveis] = useState<string[]>([]);
+  const [cargosDisponiveis, setCargosDisponiveis] = useState<string[]>([]);
+  const [previewCount, setPreviewCount] = useState<number | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<Row | null>(null);
   const runTest = useServerFn(testSmtp);
 
   async function refreshRows() {
     const { data: all, error } = await supabase
       .from("gestores")
-      .select("id, nome, email")
+      .select("id, nome, email, setor, turno")
       .order("nome", { ascending: true });
     if (error) {
       toast.error(`Erro ao carregar gestores: ${error.message}`);
@@ -112,6 +132,8 @@ export function GestoresModal({
         id: g.id,
         nome: g.nome,
         email: isFallbackEmail(g.email) ? "" : g.email ?? "",
+        setor: (g as { setor?: string | null }).setor ?? null,
+        turno: (g as { turno?: string | null }).turno ?? null,
         colaboradoresCount: countMap.get(g.id) ?? 0,
       })),
     );
@@ -122,12 +144,51 @@ export function GestoresModal({
     let cancelled = false;
     (async () => {
       if (!cancelled) await refreshRows();
+      const { data: colData } = await supabase
+        .from("colaboradores")
+        .select("cargo, area");
+      if (cancelled) return;
+      const cargoSet = new Set<string>();
+      const setorSet = new Set<string>();
+      for (const c of colData ?? []) {
+        if (c.cargo && c.cargo.trim()) cargoSet.add(c.cargo.trim());
+        if (c.area && c.area.trim()) setorSet.add(c.area.trim());
+      }
+      setCargosDisponiveis(
+        Array.from(cargoSet).sort((a, b) => a.localeCompare(b, "pt-BR")),
+      );
+      setSetoresDisponiveis(
+        Array.from(setorSet).sort((a, b) => a.localeCompare(b, "pt-BR")),
+      );
     })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, gestores]);
+
+  useEffect(() => {
+    if (!open || !adding || !novoSetor || !novoCargo || !novoTurno) {
+      setPreviewCount(null);
+      return;
+    }
+    let cancelled = false;
+    setPreviewBusy(true);
+    (async () => {
+      const { count } = await supabase
+        .from("colaboradores")
+        .select("id", { count: "exact", head: true })
+        .eq("area", novoSetor)
+        .eq("cargo", novoCargo)
+        .eq("turno", novoTurno);
+      if (cancelled) return;
+      setPreviewCount(count ?? 0);
+      setPreviewBusy(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, adding, novoSetor, novoCargo, novoTurno]);
 
   const filteredRows = useMemo(() => {
     if (!busca.trim()) return rows;
@@ -236,27 +297,93 @@ export function GestoresModal({
   async function adicionar() {
     const nome = novoNome.trim();
     const emailRaw = novoEmail.trim();
+    const setor = novoSetor.trim();
+    const cargo = novoCargo.trim();
+    const turno = novoTurno;
     if (!nome) return toast.error("Informe o nome do gestor");
+    if (!setor) return toast.error("Selecione um setor para vincular colaboradores");
+    if (!cargo) return toast.error("Selecione um cargo para vincular colaboradores");
+    if (!turno) return toast.error("Selecione um turno para vincular colaboradores");
     if (emailRaw && !EMAIL_REGEX.test(emailRaw)) return toast.error("E-mail inválido");
 
     const email = emailRaw ? normalizeEmail(emailRaw) : buildFallbackEmail(nome);
 
-    if (rows.some((r) => normalizeNome(r.nome) === normalizeNome(nome))) {
-      return toast.error(`Já existe um gestor com o nome "${nome}"`);
+    if (
+      rows.some(
+        (r) =>
+          normalizeNome(r.nome) === normalizeNome(nome) &&
+          (r.setor ?? "") === setor &&
+          (r.turno ?? "") === turno,
+      )
+    ) {
+      return toast.error(
+        `Já existe o gestor "${nome}" para ${setor} · ${turno}`,
+      );
     }
-    if (rows.some((r) => r.email && normalizeEmail(r.email) === email)) {
-      return toast.error(`O e-mail ${email} já está em uso`);
+    if (
+      rows.some(
+        (r) =>
+          r.email &&
+          normalizeEmail(r.email) === email &&
+          (r.setor ?? "") === setor &&
+          (r.turno ?? "") === turno,
+      )
+    ) {
+      return toast.error(
+        `O e-mail ${email} já está em uso para ${setor} · ${turno}`,
+      );
     }
 
     setSavingId("__new__");
     try {
-      const { error } = await supabase.from("gestores").insert({ nome, email });
+      const { data: inserted, error } = await supabase
+        .from("gestores")
+        .insert({ nome, email, setor, turno } as never)
+        .select("id")
+        .single();
       if (error) throw error;
-      toast.success(`Gestor ${nome} adicionado`);
+
+      let vinculados = 0;
+      if (inserted?.id) {
+        const { data: alvos, error: selErr } = await supabase
+          .from("colaboradores")
+          .select("id")
+          .eq("area", setor)
+          .eq("cargo", cargo)
+          .eq("turno", turno);
+        if (selErr) throw selErr;
+
+        if (alvos && alvos.length > 0) {
+          const ids = alvos.map((a) => a.id);
+          const { error: linkErr } = await supabase
+            .from("colaboradores")
+            .update({ gestor_id: inserted.id })
+            .in("id", ids);
+          if (linkErr) throw linkErr;
+          vinculados = ids.length;
+        }
+      }
+
+      if (vinculados > 0) {
+        toast.success(
+          `Gestor ${nome} adicionado e vinculado a ${vinculados} colaborador${
+            vinculados === 1 ? "" : "es"
+          } (${setor} · ${cargo} · ${turno})`,
+        );
+      } else {
+        toast.success(
+          `Gestor ${nome} adicionado. Nenhum colaborador encontrado para ${setor} · ${cargo} · ${turno}`,
+        );
+      }
+
       setNovoNome("");
       setNovoEmail("");
+      setNovoSetor("");
+      setNovoCargo("");
+      setNovoTurno("");
       setAdding(false);
       onChanged();
+      if (vinculados > 0) onColaboradoresChanged?.();
       await refreshRows();
     } catch (e) {
       toast.error((e as Error).message);
@@ -281,6 +408,7 @@ export function GestoresModal({
       toast.success(`Gestor ${row.nome} removido`);
       setConfirmRemove(null);
       onChanged();
+      if (row.colaboradoresCount > 0) onColaboradoresChanged?.();
       await refreshRows();
     } catch (e) {
       toast.error((e as Error).message);
@@ -364,10 +492,14 @@ export function GestoresModal({
 
           {adding && (
             <div className="rounded-md border border-dashed bg-muted/20 p-3">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+              <p className="mb-2 text-xs text-muted-foreground">
+                Ao salvar, todos os colaboradores com o setor, cargo e turno
+                selecionados serão automaticamente vinculados a este gestor.
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div>
                   <Label htmlFor="novo-nome" className="text-xs">
-                    Nome
+                    Nome <span className="text-destructive">*</span>
                   </Label>
                   <Input
                     id="novo-nome"
@@ -388,21 +520,117 @@ export function GestoresModal({
                     onChange={(e) => setNovoEmail(e.target.value)}
                   />
                 </div>
-                <div className="flex items-end">
-                  <Button
-                    size="sm"
-                    onClick={adicionar}
-                    disabled={savingId === "__new__" || !novoNome.trim()}
-                    className="w-full sm:w-auto"
-                  >
-                    {savingId === "__new__" ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Save className="h-4 w-4" />
-                    )}
-                    <span className="ml-1">Adicionar</span>
-                  </Button>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="novo-setor" className="text-xs">
+                    Setor / Área <span className="text-destructive">*</span>
+                  </Label>
+                  <Select value={novoSetor} onValueChange={setNovoSetor}>
+                    <SelectTrigger id="novo-setor">
+                      <SelectValue placeholder="Selecione o setor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {setoresDisponiveis.length === 0 && (
+                        <SelectItem value="__none__" disabled>
+                          Nenhum setor cadastrado
+                        </SelectItem>
+                      )}
+                      {setoresDisponiveis.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+                <div>
+                  <Label htmlFor="novo-cargo" className="text-xs">
+                    Cargo <span className="text-destructive">*</span>
+                  </Label>
+                  <Select value={novoCargo} onValueChange={setNovoCargo}>
+                    <SelectTrigger id="novo-cargo">
+                      <SelectValue placeholder="Selecione o cargo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cargosDisponiveis.length === 0 && (
+                        <SelectItem value="__none__" disabled>
+                          Nenhum cargo cadastrado
+                        </SelectItem>
+                      )}
+                      {cargosDisponiveis.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="novo-turno" className="text-xs">
+                    Turno <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={novoTurno}
+                    onValueChange={(v) => setNovoTurno(v as Turno)}
+                  >
+                    <SelectTrigger id="novo-turno">
+                      <SelectValue placeholder="Selecione o turno" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TURNOS.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-xs">
+                  {!novoSetor || !novoCargo || !novoTurno ? (
+                    <span className="text-muted-foreground">
+                      Selecione setor, cargo e turno para ver quantos
+                      colaboradores serão vinculados.
+                    </span>
+                  ) : previewBusy ? (
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Verificando colaboradores...
+                    </span>
+                  ) : previewCount === 0 ? (
+                    <span className="text-amber-600 dark:text-amber-400">
+                      Nenhum colaborador encontrado para {novoSetor} ·{" "}
+                      {novoCargo} · {novoTurno}.
+                    </span>
+                  ) : (
+                    <span className="text-emerald-700 dark:text-emerald-400">
+                      <strong>{previewCount}</strong> colaborador
+                      {previewCount === 1 ? "" : "es"} de{" "}
+                      <strong>{novoSetor}</strong> ·{" "}
+                      <strong>{novoCargo}</strong> ·{" "}
+                      <strong>{novoTurno}</strong> serão vinculados
+                      automaticamente.
+                    </span>
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  onClick={adicionar}
+                  disabled={
+                    savingId === "__new__" ||
+                    !novoNome.trim() ||
+                    !novoSetor ||
+                    !novoCargo ||
+                    !novoTurno
+                  }
+                >
+                  {savingId === "__new__" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4" />
+                  )}
+                  <span className="ml-1">Adicionar e vincular</span>
+                </Button>
               </div>
             </div>
           )}
@@ -459,6 +687,12 @@ export function GestoresModal({
                             {r.colaboradoresCount} colaborador
                             {r.colaboradoresCount === 1 ? "" : "es"}
                           </Badge>
+                          {(r.setor || r.turno) && (
+                            <Badge variant="secondary" className="gap-1">
+                              {r.setor ?? "—"}
+                              {r.turno ? ` · ${r.turno}` : ""}
+                            </Badge>
+                          )}
                         </div>
                       )}
                     </div>

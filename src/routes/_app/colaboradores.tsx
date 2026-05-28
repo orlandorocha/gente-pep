@@ -69,7 +69,11 @@ function ColaboradoresPage() {
           <div className="flex items-center gap-2">
             <ImportColaboradoresButton gestores={gestores} onDone={reload} />
             <ExportColaboradoresButton colaboradores={list} area={areaFilter} turno={turnoFilter} />
-            <GestoresModal gestores={gestores} onChanged={reloadGestores} />
+            <GestoresModal
+              gestores={gestores}
+              onChanged={reloadGestores}
+              onColaboradoresChanged={reload}
+            />
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
                 <Button><Plus className="mr-2 h-4 w-4" /> Novo colaborador</Button>
