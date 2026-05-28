@@ -192,6 +192,16 @@ function ColaboradorForm({
   const [gestorId, setGestorId] = useState<string>(initial?.gestor_id ?? "");
   const [submitting, setSubmitting] = useState(false);
 
+  const gestoresDisponiveis = useMemo(() => {
+    const seen = new Set<string>();
+    return gestores.filter((g) => {
+      const nomeNormalizado = g.nome.trim().toLowerCase();
+      if (seen.has(nomeNormalizado)) return false;
+      seen.add(nomeNormalizado);
+      return true;
+    });
+  }, [gestores]);
+
   return (
     <form
       className="mt-2 space-y-4"
@@ -265,7 +275,9 @@ function ColaboradorForm({
           <Select value={gestorId} onValueChange={setGestorId}>
             <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
             <SelectContent>
-              {gestores.map((g) => <SelectItem key={g.id} value={g.id}>{g.nome}</SelectItem>)}
+              {gestoresDisponiveis.map((g) => (
+                <SelectItem key={g.id} value={g.id}>{g.nome}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
