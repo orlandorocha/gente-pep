@@ -29,26 +29,67 @@ export function AppLayout() {
   const { user } = useAuth();
   const sincronizar = useServerFn(sincronizarFaltasDoDia);
   const syncStartedRef = useRef(false);
+  const lastSyncedDayRef = useRef<string | null>(null);
+  const syncTimerRef = useRef<number | null>(null);
+  const syncIntervalRef = useRef<number | null>(null);
   const meta = titles[path] ?? { title: "Guardião de Gente", sub: "" };
 
   const initials = (user?.email ?? "U").slice(0, 2).toUpperCase();
   const gpid = (user?.user_metadata as { gpid?: string } | undefined)?.gpid;
 
   useEffect(() => {
-    if (!user || syncStartedRef.current || typeof window === "undefined") return;
-    syncStartedRef.current = true;
+    if (!user || typeof window === "undefined") return;
+
+    const syncForDay = async (day: string) => {
+      const storageKey = `faltas-sync:${day}`;
+      if (window.sessionStorage.getItem(storageKey) === "done") {
+        lastSyncedDayRef.current = day;
+        return;
+      }
+      if (syncStartedRef.current) return;
+      syncStartedRef.current = true;
+
+      try {
+        await sincronizar();
+        window.sessionStorage.setItem(storageKey, "done");
+        lastSyncedDayRef.current = day;
+      } catch {
+        lastSyncedDayRef.current = null;
+      } finally {
+        syncStartedRef.current = false;
+      }
+    };
+
+    const scheduleNextSync = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now);
+      nextMidnight.setHours(24, 0, 0, 0);
+      const timeout = nextMidnight.getTime() - now.getTime();
+      if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = window.setTimeout(async () => {
+        const nextDay = formatLocalDateISO();
+        await syncForDay(nextDay);
+        scheduleNextSync();
+      }, timeout);
+    };
+
+    const checkDateChange = () => {
+      const today = formatLocalDateISO();
+      if (lastSyncedDayRef.current !== today) {
+        void syncForDay(today);
+      }
+    };
 
     const today = formatLocalDateISO();
-    const storageKey = `faltas-sync:${today}`;
-    if (window.sessionStorage.getItem(storageKey) === "done") return;
+    void syncForDay(today);
+    scheduleNextSync();
+    if (syncIntervalRef.current) window.clearInterval(syncIntervalRef.current);
+    syncIntervalRef.current = window.setInterval(checkDateChange, 5 * 60 * 1000);
 
-    void sincronizar()
-      .then(() => {
-        window.sessionStorage.setItem(storageKey, "done");
-      })
-      .catch(() => {
-        syncStartedRef.current = false;
-      });
+    return () => {
+      if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+      if (syncIntervalRef.current) window.clearInterval(syncIntervalRef.current);
+    };
   }, [sincronizar, user]);
 
   return (
