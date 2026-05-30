@@ -75,7 +75,6 @@ type Row = {
   nome: string;
   email: string;
   setor?: string | null;
-  cargo?: string | null;
   turno?: string | null;
   colaboradoresCount: number;
   isNew?: boolean;
@@ -114,7 +113,7 @@ export function GestoresModal({
   async function refreshRows() {
     const { data: all, error } = await supabase
       .from("gestores")
-      .select("id, nome, email, setor, cargo, turno")
+      .select("id, nome, email, setor, turno")
       .order("nome", { ascending: true });
     if (error) {
       toast.error(`Erro ao carregar gestores: ${error.message}`);
@@ -134,7 +133,6 @@ export function GestoresModal({
         nome: g.nome,
         email: isFallbackEmail(g.email) ? "" : g.email ?? "",
         setor: (g as { setor?: string | null }).setor ?? null,
-        cargo: (g as { cargo?: string | null }).cargo ?? null,
         turno: (g as { turno?: string | null }).turno ?? null,
         colaboradoresCount: countMap.get(g.id) ?? 0,
       })),
@@ -267,27 +265,17 @@ export function GestoresModal({
 
     setSavingId(row.id);
     try {
-      const rowSetor = row.setor ?? "";
-      const rowCargo = row.cargo ?? "";
-      const rowTurno = row.turno ?? "";
       const conflito = rows.find(
         (r) =>
           r.id !== row.id &&
-          (r.setor ?? "") === rowSetor &&
-          (r.cargo ?? "") === rowCargo &&
-          (r.turno ?? "") === rowTurno &&
           (normalizeNome(r.nome) === normalizeNome(nome) ||
             (r.email && normalizeEmail(r.email) === email)),
       );
       if (conflito) {
         if (normalizeNome(conflito.nome) === normalizeNome(nome)) {
-          throw new Error(
-            `Já existe um gestor com o nome "${nome}" para ${rowSetor} · ${rowCargo} · ${rowTurno}`,
-          );
+          throw new Error(`Já existe um gestor com o nome "${nome}"`);
         }
-        throw new Error(
-          `O e-mail ${email} já pertence a ${conflito.nome} para ${rowSetor} · ${rowCargo} · ${rowTurno}`,
-        );
+        throw new Error(`O e-mail ${email} já pertence a ${conflito.nome}`);
       }
 
       const { error } = await supabase
@@ -325,12 +313,11 @@ export function GestoresModal({
         (r) =>
           normalizeNome(r.nome) === normalizeNome(nome) &&
           (r.setor ?? "") === setor &&
-          (r.cargo ?? "") === cargo &&
           (r.turno ?? "") === turno,
       )
     ) {
       return toast.error(
-        `Já existe o gestor "${nome}" para ${setor} · ${cargo} · ${turno}`,
+        `Já existe o gestor "${nome}" para ${setor} · ${turno}`,
       );
     }
     if (
@@ -339,12 +326,11 @@ export function GestoresModal({
           r.email &&
           normalizeEmail(r.email) === email &&
           (r.setor ?? "") === setor &&
-          (r.cargo ?? "") === cargo &&
           (r.turno ?? "") === turno,
       )
     ) {
       return toast.error(
-        `O e-mail ${email} já está em uso para ${setor} · ${cargo} · ${turno}`,
+        `O e-mail ${email} já está em uso para ${setor} · ${turno}`,
       );
     }
 
@@ -352,7 +338,7 @@ export function GestoresModal({
     try {
       const { data: inserted, error } = await supabase
         .from("gestores")
-        .insert({ nome, email, setor, cargo, turno } as never)
+        .insert({ nome, email, setor, turno } as never)
         .select("id")
         .single();
       if (error) throw error;
@@ -701,9 +687,10 @@ export function GestoresModal({
                             {r.colaboradoresCount} colaborador
                             {r.colaboradoresCount === 1 ? "" : "es"}
                           </Badge>
-                          {(r.setor || r.cargo || r.turno) && (
+                          {(r.setor || r.turno) && (
                             <Badge variant="secondary" className="gap-1">
-                              {r.setor ?? "—"} · {r.cargo ?? "—"} · {r.turno ?? "—"}
+                              {r.setor ?? "—"}
+                              {r.turno ? ` · ${r.turno}` : ""}
                             </Badge>
                           )}
                         </div>

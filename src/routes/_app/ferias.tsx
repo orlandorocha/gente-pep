@@ -22,6 +22,7 @@ import { formatDateBr, formatDateRangeBr } from "@/lib/date";
 import { toast } from "sonner";
 import { Check, X, CalendarRange } from "lucide-react";
 import { ExportFeriasButton, ImportFeriasButton } from "@/components/XlsxButtons";
+import { ImprimirFeriasButton } from "@/components/ImprimirFeriasButton";
 import { DataPagination, usePagination } from "@/components/DataPagination";
 
 export const Route = createFileRoute("/_app/ferias")({ component: FeriasPage });
@@ -319,6 +320,7 @@ function FeriasPage() {
           <div className="flex flex-wrap items-center gap-2">
             <ImportFeriasButton colabs={colabs as any} onDone={reload} />
             <ExportFeriasButton ferias={filteredFerias as any} colabs={colabs as any} area={areaFilter} turno={turnoFilter} />
+            <ImprimirFeriasButton ferias={ferias as any} colabs={colabs as any} />
             <FormSheet triggerLabel="Solicitar férias" title="Solicitar férias">
               {(close) => (
                 <FeriasForm

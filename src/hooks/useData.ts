@@ -31,15 +31,7 @@ export type ColaboradorRow = {
   cargo: string; area: string; turno: "Manhã"|"Tarde"|"Noite";
   status: "Ativo"|"Inativo"|"Afastado"; gestor_id: string | null;
 };
-export type GestorRow = {
-  id: string;
-  nome: string;
-  email: string;
-  teams_user_id: string | null;
-  setor?: string | null;
-  cargo?: string | null;
-  turno?: "Manhã"|"Tarde"|"Noite";
-};
+export type GestorRow = { id: string; nome: string; email: string; teams_user_id: string | null };
 
 export function useColaboradores() {
   const [data, setData] = useState<ColaboradorRow[]>([]);

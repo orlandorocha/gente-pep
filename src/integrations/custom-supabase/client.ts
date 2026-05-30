@@ -38,10 +38,7 @@ export const supabase = new Proxy({} as ReturnType<typeof createCustomClient>, {
 export async function ensureAuthSessionReady() {
   if (typeof window === "undefined") return;
   if (!_sessionReady) {
-    _sessionReady = supabase.auth
-      .getSession()
-      .then(() => undefined)
-      .catch(() => undefined);
+    _sessionReady = supabase.auth.getSession().then(() => undefined);
   }
   await _sessionReady;
 }

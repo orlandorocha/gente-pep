@@ -23,13 +23,8 @@ export const Route = createFileRoute("/login")({
   beforeLoad: async () => {
     if (typeof window === "undefined") return;
     await ensureAuthSessionReady();
-    try {
-      const { data } = await supabase.auth.getSession();
-      if (data.session) throw redirect({ to: "/dashboard" });
-    } catch {
-      // Falha ao verificar sessão normalmente indica que não há conexão de rede,
-      // então deixamos o usuário na tela de login para tentar novamente.
-    }
+    const { data } = await supabase.auth.getSession();
+    if (data.session) throw redirect({ to: "/dashboard" });
   },
   component: LoginPage,
 });
