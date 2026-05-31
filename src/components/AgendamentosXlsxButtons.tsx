@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Download, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/custom-supabase/client";
 import { downloadXlsx, findColaborador, readXlsxRows, toISODate } from "@/lib/xlsx-utils";
@@ -121,6 +122,8 @@ export function ImportAgendamentosButton({
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [errorRows, setErrorRows] = useState<string[]>([]);
+  const [showErrorDialog, setShowErrorDialog] = useState(false);
 
   async function handle(file: File) {
     setBusy(true);
@@ -200,7 +203,14 @@ export function ImportAgendamentosButton({
 
       if (ok) toast.success(`${ok} agendamentos importados. ${erros.length} erros.`);
       else toast.error(`Nenhum agendamento importado. ${erros.length} erros.`);
-      if (erros.length) console.warn("Importação agendamentos — erros:", erros);
+      if (erros.length) {
+        console.warn("Importação agendamentos — erros:", erros);
+        setErrorRows(erros);
+        setShowErrorDialog(true);
+      } else {
+        setErrorRows([]);
+        setShowErrorDialog(false);
+      }
       onDone();
     } catch (e) {
       toast.error((e as Error).message);
@@ -221,6 +231,30 @@ export function ImportAgendamentosButton({
           e.target.value = "";
         }}
       />
+      <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Erros na importação de agendamentos</DialogTitle>
+            <DialogDescription>
+              Apenas os colaboradores com falha na importação são exibidos abaixo. Revise e tente novamente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-72 overflow-y-auto rounded-md border border-secondary p-4 text-sm">
+            {errorRows.length ? (
+              errorRows.map((error, index) => (
+                <div key={index} className="break-words">{error}</div>
+              ))
+            ) : (
+              <div>Nenhum erro registrado.</div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowErrorDialog(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Button variant="outline" size="sm" disabled={busy} onClick={() => ref.current?.click()}>
         <Upload className="mr-1 h-4 w-4" />
         {busy ? "Importando..." : "Importar XLSX"}

@@ -104,6 +104,8 @@ async function upsertFaltasBatch(batch: FaltaImportRow[], erros: string[]) {
 export function ImportFaltasButton({ colabs, onDone }: { colabs: Colab[]; onDone: () => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [errorRows, setErrorRows] = useState<string[]>([]);
+  const [showErrorDialog, setShowErrorDialog] = useState(false);
 
   async function handle(file: File) {
     setBusy(true);
@@ -130,7 +132,14 @@ export function ImportFaltasButton({ colabs, onDone }: { colabs: Colab[]; onDone
         ok += await upsertFaltasBatch(batch, erros);
       }
       toast.success(`${ok} faltas importadas/atualizadas. ${erros.length} erros.`);
-      if (erros.length) console.warn("Importação faltas — erros:", erros);
+      if (erros.length) {
+        console.warn("Importação faltas — erros:", erros);
+        setErrorRows(erros);
+        setShowErrorDialog(true);
+      } else {
+        setErrorRows([]);
+        setShowErrorDialog(false);
+      }
       onDone();
     } catch (e) { toast.error((e as Error).message); }
     setBusy(false);
@@ -141,6 +150,30 @@ export function ImportFaltasButton({ colabs, onDone }: { colabs: Colab[]; onDone
       <input ref={ref} type="file" accept=".xlsx" hidden onChange={(e) => {
         const f = e.target.files?.[0]; if (f) handle(f); e.target.value = "";
       }} />
+      <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Erros na importação de faltas</DialogTitle>
+            <DialogDescription>
+              Apenas os colaboradores com erro de importação foram listados abaixo. Revise os itens e tente novamente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-72 overflow-y-auto rounded-md border border-secondary p-4 text-sm">
+            {errorRows.length ? (
+              errorRows.map((error, index) => (
+                <div key={index} className="break-words">{error}</div>
+              ))
+            ) : (
+              <div>Nenhum erro registrado.</div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowErrorDialog(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Button variant="outline" size="sm" disabled={busy} onClick={() => ref.current?.click()}>
         <Upload className="h-4 w-4 mr-1" />{busy ? "Importando..." : "Importar XLSX"}
       </Button>
@@ -305,6 +338,8 @@ export function EmailGestoresButton() {
 export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone: () => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [errorRows, setErrorRows] = useState<string[]>([]);
+  const [showErrorDialog, setShowErrorDialog] = useState(false);
 
   async function handle(file: File) {
     setBusy(true);
@@ -330,7 +365,7 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
           ?? r.Gpid
           ?? "",
         ).trim();
-        if (!inicio || !fim || !pa) { erros.push(`Linha ${i + 2}: campos obrigatórios faltando`); continue; }
+        if (!inicio || !fim || !pa) { erros.push(`Linha ${i + 2}: campos obrigatórios faltando (colaborador: "${ref || "não informado"}")`); continue; }
         const c = findColaborador(colabs, ref);
         if (!c) { erros.push(`Linha ${i + 2}: colaborador "${ref}" não encontrado`); continue; }
         inserts.push({
@@ -365,7 +400,14 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
         }
       }
       toast.success(`${ok} férias importadas/atualizadas. ${erros.length} erros.`);
-      if (erros.length) console.warn("Importação férias — erros:", erros);
+      if (erros.length) {
+        console.warn("Importação férias — erros:", erros);
+        setErrorRows(erros);
+        setShowErrorDialog(true);
+      } else {
+        setErrorRows([]);
+        setShowErrorDialog(false);
+      }
       onDone();
     } catch (e) { toast.error((e as Error).message); }
     setBusy(false);
@@ -376,6 +418,30 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
       <input ref={ref} type="file" accept=".xlsx" hidden onChange={(e) => {
         const f = e.target.files?.[0]; if (f) handle(f); e.target.value = "";
       }} />
+      <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Erros na importação de férias</DialogTitle>
+            <DialogDescription>
+              Apenas os colaboradores com erro de importação foram listados abaixo. Revise cada item e tente novamente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-72 overflow-y-auto rounded-md border border-secondary p-4 text-sm">
+            {errorRows.length ? (
+              errorRows.map((error, index) => (
+                <div key={index} className="break-words">{error}</div>
+              ))
+            ) : (
+              <div>Nenhum erro registrado.</div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowErrorDialog(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Button variant="outline" size="sm" disabled={busy} onClick={() => ref.current?.click()}>
         <Upload className="h-4 w-4 mr-1" />{busy ? "Importando..." : "Importar XLSX"}
       </Button>

@@ -49,6 +49,15 @@ function ColaboradoresPage() {
     [colaboradores],
   );
 
+  const uniqueGestores = useMemo(() => {
+    const seen = new Set<string>();
+    return gestores.filter((g) => {
+      if (seen.has(g.nome)) return false;
+      seen.add(g.nome);
+      return true;
+    });
+  }, [gestores]);
+
   const list = colaboradores.filter((c) => {
     const matchesText = [c.nome, c.email, c.gpid, c.area, c.turno, c.cargo]
       .join(" ")
@@ -80,7 +89,7 @@ function ColaboradoresPage() {
               </SheetTrigger>
               <SheetContent className="sm:max-w-md overflow-y-auto">
                 <SheetHeader><SheetTitle></SheetTitle></SheetHeader>
-                <ColaboradorForm gestores={gestores} onSaved={() => { reload(); setOpen(false); }} />
+                <ColaboradorForm gestores={gestores} uniqueGestores={uniqueGestores} onSaved={() => { reload(); setOpen(false); }} />
               </SheetContent>
             </Sheet>
           </div>
@@ -166,6 +175,7 @@ function ColaboradoresPage() {
         {(close) => editing && (
           <ColaboradorForm
             gestores={gestores}
+            uniqueGestores={uniqueGestores}
             initial={editing}
             onSaved={() => { reload(); setEditing(null); close(); }}
           />
@@ -176,9 +186,10 @@ function ColaboradoresPage() {
 }
 
 function ColaboradorForm({
-  gestores, onSaved, initial,
+  gestores, uniqueGestores, onSaved, initial,
 }: {
   gestores: { id: string; nome: string }[];
+  uniqueGestores: { id: string; nome: string }[];
   onSaved: () => void;
   initial?: ColaboradorRow;
 }) {
@@ -265,7 +276,7 @@ function ColaboradorForm({
           <Select value={gestorId} onValueChange={setGestorId}>
             <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
             <SelectContent>
-              {gestores.map((g) => <SelectItem key={g.id} value={g.id}>{g.nome}</SelectItem>)}
+              {uniqueGestores.map((g) => <SelectItem key={g.id} value={g.id}>{g.nome}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
