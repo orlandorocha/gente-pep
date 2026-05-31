@@ -3,24 +3,47 @@
 
 import { formatDateRangeBr } from "./date";
 
-const APP_URL =
-  process.env.APP_URL ||
-  process.env.SITE_URL ||
-  "https://id-preview--81117fc9-c668-4576-9f4e-cd1fa0309dd9.lovable.app";
-
-type FeriasPayload = {
+export type FeriasPayload = {
+  token: string;
   colaboradorNome: string;
-  gestorNome: string;
-  gestorEmail: string;
-  gestorTeamsUserId?: string | null;
   inicio: string;
   fim: string;
   periodoAquisitivo: string;
-  token: string;
+  gestorNome: string;
+  gestorEmail: string;
+  gestorTeamsUserId?: string | null;
 };
 
+function normalizeBaseUrl(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (!trimmed) return null;
+  // VERCEL_URL e similares vêm sem protocolo.
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+// Resolve a URL pública da aplicação, priorizando configuração explícita e,
+// em produção na Vercel, o domínio de produção do projeto. Evita cair em
+// previews ou domínios temporários que causam 404 ao clicar no link do e-mail.
+function resolveAppUrl(): string {
+  const candidate =
+    normalizeBaseUrl(process.env.APP_URL) ||
+    normalizeBaseUrl(process.env.SITE_URL) ||
+    normalizeBaseUrl(process.env.VERCEL_PROJECT_PRODUCTION_URL) ||
+    normalizeBaseUrl(process.env.VERCEL_URL);
+
+  if (!candidate) {
+    console.warn(
+      "[ferias] APP_URL não configurado — defina APP_URL com o domínio de produção (ex.: https://gente-pespsico.com.br) para que os links de aprovação funcionem.",
+    );
+    return "";
+  }
+  return candidate;
+}
+
 function approvalUrl(token: string, action: "approve" | "reject") {
-  return `${APP_URL}/api/public/ferias/decisao?token=${token}&action=${action}`;
+  const base = resolveAppUrl();
+  return `${base}/api/public/ferias/decisao?token=${encodeURIComponent(token)}&action=${action}`;
 }
 
 export async function sendVacationEmail(p: FeriasPayload): Promise<{ ok: boolean; reason?: string }> {

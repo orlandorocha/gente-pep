@@ -49,8 +49,6 @@ export function ImprimirFeriasButton({
   const [open, setOpen] = useState(false);
   const [aquisitivo, setAquisitivo] = useState("all");
   const [status, setStatus] = useState("all");
-  const [area, setArea] = useState("all");
-  const [turno, setTurno] = useState("all");
 
   const colMap = useMemo(() => new Map(colabs.map((c) => [c.id, c])), [colabs]);
 
@@ -62,22 +60,10 @@ export function ImprimirFeriasButton({
     [ferias],
   );
 
-  const areas = useMemo(
-    () => Array.from(new Set(colabs.map((c) => c.area).filter(Boolean))).sort(),
-    [colabs],
-  );
-
-  const turnos = useMemo(
-    () => Array.from(new Set(colabs.map((c) => c.turno).filter(Boolean))).sort(),
-    [colabs],
-  );
-
   const registros = useMemo(() => {
     return ferias
       .filter((f) => aquisitivo === "all" || f.periodo_aquisitivo === aquisitivo)
       .filter((f) => status === "all" || f.status === status)
-      .filter((f) => area === "all" || (colMap.get(f.colaborador_id)?.area ?? "") === area)
-      .filter((f) => turno === "all" || (colMap.get(f.colaborador_id)?.turno ?? "") === turno)
       .map((f) => ({ ...f, colaborador: colMap.get(f.colaborador_id) }))
       .sort((a, b) => {
         const areaA = a.colaborador?.area ?? "";
@@ -85,7 +71,7 @@ export function ImprimirFeriasButton({
         if (areaA !== areaB) return areaA.localeCompare(areaB);
         return (a.colaborador?.nome ?? "").localeCompare(b.colaborador?.nome ?? "");
       });
-  }, [ferias, aquisitivo, status, area, turno, colMap]);
+  }, [ferias, aquisitivo, status, colMap]);
 
   function imprimir() {
     if (registros.length === 0) {
@@ -102,8 +88,6 @@ export function ImprimirFeriasButton({
     const tituloAquisitivo =
       aquisitivo === "all" ? "Todos os períodos aquisitivos" : `Aquisitivo ${aquisitivo}`;
     const tituloStatus = status === "all" ? "Todos os status" : status;
-    const tituloArea = area === "all" ? "Todas as áreas" : area;
-    const tituloTurno = turno === "all" ? "Todos os turnos" : turno;
     const emitidoEm = new Date().toLocaleString("pt-BR");
 
     const linhas = registros
@@ -145,8 +129,6 @@ export function ImprimirFeriasButton({
     <div class="meta">
       <div><strong>Período aquisitivo:</strong> ${escapeHtml(tituloAquisitivo)}</div>
       <div><strong>Status:</strong> ${escapeHtml(tituloStatus)}</div>
-      <div><strong>Área:</strong> ${escapeHtml(tituloArea)}</div>
-      <div><strong>Turno:</strong> ${escapeHtml(tituloTurno)}</div>
       <div><strong>Emitido em:</strong> ${escapeHtml(emitidoEm)}</div>
     </div>
     <table>
@@ -215,36 +197,6 @@ export function ImprimirFeriasButton({
               {(["Pendente", "Aprovada", "Recusada", "Em gozo", "Concluída"] as const).map((s) => (
                 <option key={s} value={s}>
                   {s}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-2">
-            <Label>Área</Label>
-            <select
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-              value={area}
-              onChange={(e) => setArea(e.target.value)}
-            >
-              <option value="all">Todas</option>
-              {areas.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-2">
-            <Label>Turno</Label>
-            <select
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-              value={turno}
-              onChange={(e) => setTurno(e.target.value)}
-            >
-              <option value="all">Todos</option>
-              {turnos.map((t) => (
-                <option key={t} value={t}>
-                  {t}
                 </option>
               ))}
             </select>

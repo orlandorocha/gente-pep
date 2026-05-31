@@ -23,7 +23,7 @@ import { Route as AppColaboradoresRouteImport } from './routes/_app/colaboradore
 import { Route as AppAlertasRouteImport } from './routes/_app/alertas'
 import { Route as AppAgendamentosRouteImport } from './routes/_app/agendamentos'
 import { Route as ApiPublicHooksSyncFaltasRouteImport } from './routes/api/public/hooks/sync-faltas'
-import { Route as ApiPublicFeriasDecisaoRouteImport } from './routes/api/public/ferias.decisao'
+import { Route as ApiPublicFeriasDecisaoRouteImport } from './routes/api/public/ferias/decisao'
 
 const RecuperarRoute = RecuperarRouteImport.update({
   id: '/recuperar',
