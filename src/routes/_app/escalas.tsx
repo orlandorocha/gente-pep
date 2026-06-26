@@ -4,7 +4,9 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   CalendarDays,
+  Check,
   CheckCircle2,
+  ChevronsUpDown,
   Plus,
   RefreshCw,
   Sparkles,
@@ -32,6 +34,19 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { PageHeader } from "@/components/PageHeader";
 import {
   Tooltip,
@@ -51,6 +66,7 @@ import {
   saveColaboradores,
   subscribeEscala,
   upsertDia,
+  upsertDias,
   type ColaboradorBase,
 } from "@/lib/escala-store";
 
@@ -58,13 +74,19 @@ import {
   addDays,
   avaliarMes,
   diasDoMes,
+  gerarEscala6x1,
   isDomingo,
+  limiteFolgaCargo,
   podeMarcarTrabalho,
   sugerirFolgaCompensatoria,
   sugerirFolgaCompensatoriaAntes,
   toISODate,
 } from "@/lib/escala-engine";
 
+import {
+  feriadosNacionaisSet,
+  mapaFeriados,
+} from "@/lib/feriados-brasil";
 import type {
   DiaTipo,
   EscalaColaborador,
@@ -121,7 +143,13 @@ function EscalasPage() {
     [version],
   );
   const dias = useMemo(() => loadDias(), [version]);
-  const feriados = useMemo(() => new Set(loadFeriados()), [version]);
+  // Feriados = nacionais brasileiros (auto) + cadastrados manualmente.
+  const feriados = useMemo(() => {
+    const set = feriadosNacionaisSet(ano);
+    for (const d of loadFeriados()) set.add(d);
+    return set;
+  }, [version, ano]);
+  const nomesFeriados = useMemo(() => mapaFeriados(ano), [ano]);
   const datas = useMemo(() => diasDoMes(ano, mes), [ano, mes]);
 
   // aplica feriados
@@ -265,6 +293,20 @@ function EscalasPage() {
   function adicionarColaborador(c: EscalaColaborador) {
     const next = [...colaboradores, c];
     saveColaboradores(next);
+
+    // Gera automaticamente a escala 6x1 do novo colaborador a partir do 1º dia
+    // do mês visível, distribuindo folgas conforme os limites por dia/cargo.
+    const inicio = toISODate(new Date(ano, mes - 1, 1));
+    const gerados = gerarEscala6x1(c, colaboradores, dias, inicio, 9);
+    if (gerados.length) {
+      upsertDias(gerados);
+      const folgas = gerados.filter(
+        (d) => d.tipo === "folga" || d.tipo === "compensatoria",
+      ).length;
+      toast.success(
+        `Escala 6x1 gerada para ${c.nome}: ${folgas} folgas distribuídas (limite ${limiteFolgaCargo(c.cargo)}/dia para ${c.cargo}).`,
+      );
+    }
     reload();
   }
 
@@ -382,18 +424,43 @@ function EscalasPage() {
                   {datas.map((d) => {
                     const dia = parseInt(d.slice(-2), 10);
                     const dom = isDomingo(d);
+                    const nomeFeriado = nomesFeriados.get(d);
+                    const ehFeriado = !!nomeFeriado;
                     return (
                       <th
                         key={d}
                         className={cn(
                           "w-9 px-1 py-2 text-center font-medium",
-                          dom && "text-red-600",
+                          dom && "bg-red-500/10 text-red-600",
+                          ehFeriado && "bg-violet-500/10 text-violet-700",
                         )}
                       >
-                        <div className="text-[10px] uppercase">
-                          {new Date(d).toLocaleString("pt-BR", { weekday: "narrow" })}
-                        </div>
-                        <div>{dia}</div>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="flex flex-col items-center">
+                              <div className="text-[10px] uppercase">
+                                {new Date(d).toLocaleString("pt-BR", {
+                                  weekday: "narrow",
+                                })}
+                              </div>
+                              <div>{dia}</div>
+                              {(dom || ehFeriado) && (
+                                <div className="mt-0.5 h-1 w-1 rounded-full bg-current" />
+                              )}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <div className="text-xs">
+                              {ehFeriado && (
+                                <div className="font-medium text-violet-600">
+                                  Feriado: {nomeFeriado}
+                                </div>
+                              )}
+                              {dom && <div className="text-red-500">Domingo</div>}
+                              {!dom && !ehFeriado && <div>Dia útil</div>}
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
                       </th>
                     );
                   })}
@@ -642,6 +709,8 @@ function NovoColaboradorDialog({
   const [base, setBase] = useState<ColaboradorBase[]>([]);
   const [loadingBase, setLoadingBase] = useState(false);
   const [selectedBaseId, setSelectedBaseId] = useState<string>("");
+  const [baseOpen, setBaseOpen] = useState(false);
+  const selectedBase = base.find((b) => b.id === selectedBaseId) ?? null;
   const [form, setForm] = useState<Omit<EscalaColaborador, "id" | "matricula" | "escala">>({
     nome: "",
     cargo: "",
@@ -718,31 +787,87 @@ function NovoColaboradorDialog({
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Colaborador (base)" full>
-            <Select value={selectedBaseId} onValueChange={handleSelectBase}>
-              <SelectTrigger>
-                <SelectValue
-                  placeholder={
-                    loadingBase ? "Carregando..." : "Selecione o colaborador"
+            <Popover open={baseOpen} onOpenChange={setBaseOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={baseOpen}
+                  className="w-full justify-between font-normal"
+                >
+                  {selectedBase ? (
+                    <span className="truncate">
+                      {selectedBase.nome}{" "}
+                      <span className="text-muted-foreground">
+                        · {selectedBase.matricula}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      {loadingBase ? "Carregando..." : "Buscar colaborador..."}
+                    </span>
+                  )}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="w-[--radix-popover-trigger-width] p-0"
+                align="start"
+              >
+                <Command
+                  filter={(itemValue, search) =>
+                    itemValue.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
                   }
-                />
-              </SelectTrigger>
-              <SelectContent className="max-h-72">
-                {base.length === 0 && !loadingBase && (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                    Nenhum colaborador ativo encontrado na base.
-                  </div>
-                )}
-                {base.map((b) => {
-                  const ja = jaCadastrados.has(b.matricula);
-                  return (
-                    <SelectItem key={b.id} value={b.id} disabled={ja}>
-                      {b.nome} · {b.matricula}
-                      {ja ? " (já cadastrado)" : ""}
-                    </SelectItem>
-                  );
-                })}
-              </SelectContent>
-            </Select>
+                >
+                  <CommandInput placeholder="Buscar por nome ou matrícula..." />
+                  <CommandList>
+                    <CommandEmpty>
+                      {loadingBase
+                        ? "Carregando..."
+                        : "Nenhum colaborador encontrado."}
+                    </CommandEmpty>
+                    <CommandGroup>
+                      {base.map((b) => {
+                        const ja = jaCadastrados.has(b.matricula);
+                        return (
+                          <CommandItem
+                            key={b.id}
+                            value={`${b.nome} ${b.matricula} ${b.cargo} ${b.setor}`}
+                            disabled={ja}
+                            onSelect={() => {
+                              if (ja) return;
+                              handleSelectBase(b.id);
+                              setBaseOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                selectedBaseId === b.id
+                                  ? "opacity-100"
+                                  : "opacity-0",
+                              )}
+                            />
+                            <div className="flex flex-col">
+                              <span className="font-medium">
+                                {b.nome}
+                                {ja ? " (já cadastrado)" : ""}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {b.matricula}
+                                {b.cargo ? ` · ${b.cargo}` : ""}
+                                {b.setor ? ` · ${b.setor}` : ""}
+                              </span>
+                            </div>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </Field>
           <Field label="Cargo">
             <Select
