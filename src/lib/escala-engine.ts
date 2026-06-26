@@ -362,13 +362,14 @@ export function sugerirFolgaCompensatoria(
  * distribuindo as folgas semanais de forma a respeitar os limites de
  * colaboradores em folga por dia (global e por cargo).
  *
- * Regras aplicadas:
- * - Trabalha 6 dias e folga 1 a cada janela de 7 dias.
+ * Regras aplicadas (semanas alinhadas de SEGUNDA a DOMINGO):
+ * - Trabalha 6 dias e folga 1 por semana.
  * - Quando NÃO aceita domingo: a folga semanal recai no domingo (nunca trabalha).
- * - Quando ACEITA domingo: pode trabalhar no domingo e, nesse caso, a folga da
- *   semana é marcada como "compensatória" (CLT art. 67 / Súmula 146 TST).
- * - A folga é alocada no dia com MENOR ocupação que ainda respeite o limite
- *   global ({@link LIMITE_FOLGA_DIA_GLOBAL}) e o limite do cargo
+ * - Quando ACEITA domingo: o domingo é SEMPRE trabalhado e a folga da semana é
+ *   marcada como "compensatória" e alocada OBRIGATORIAMENTE em um dia útil
+ *   ANTES do domingo (segunda a sábado) — CLT art. 67 / Súmula 146 TST.
+ * - A folga/compensatória é alocada no dia com MENOR ocupação que ainda respeite
+ *   o limite global ({@link LIMITE_FOLGA_DIA_GLOBAL}) e o do cargo
  *   ({@link limiteFolgaCargo}). Se nenhum dia respeitar, escolhe o menos cheio.
  *
  * @param colab            colaborador para o qual gerar a escala
@@ -415,54 +416,57 @@ export function gerarEscala6x1(
     m.set(cargoUp, loadCargo(data) + 1);
   };
 
+  // Escolhe o melhor dia (menor ocupação respeitando limites) dentro de uma lista.
+  const escolherDia = (dias: string[]): string => {
+    const candidatas = dias.map((d) => ({
+      d,
+      total: loadTotal(d),
+      cargo: loadCargo(d),
+    }));
+    const validas = candidatas.filter(
+      (c) => c.total < LIMITE_FOLGA_DIA_GLOBAL && c.cargo < limCargo,
+    );
+    const pool = validas.length ? validas : candidatas;
+    pool.sort(
+      (a, b) => a.total - b.total || a.cargo - b.cargo || a.d.localeCompare(b.d),
+    );
+    return pool[0].d;
+  };
+
+  // Alinha o início na SEGUNDA-feira da semana de `inicioISO` (domingo = último dia).
+  const diaSemanaInicio = parseISODate(inicioISO).getDay(); // 0=dom..6=sáb
+  const offsetSegunda = diaSemanaInicio === 0 ? -6 : 1 - diaSemanaInicio;
+  const primeiraSegunda = addDays(inicioISO, offsetSegunda);
+
   const result: DiaEscala[] = [];
 
   for (let w = 0; w < semanas; w++) {
+    // semana[0..5] = seg..sáb, semana[6] = domingo
     const semana: string[] = [];
-    for (let i = 0; i < 7; i++) semana.push(addDays(inicioISO, w * 7 + i));
-    const domingo = semana.find((d) => isDomingo(d)) ?? null;
+    for (let i = 0; i < 7; i++) semana.push(addDays(primeiraSegunda, w * 7 + i));
+    const domingo = semana[6];
+    const diasUteis = semana.slice(0, 6); // seg a sáb (todos antes do domingo)
 
-    let folgaData: string;
-    if (!colab.aceitaDomingo && domingo) {
-      // Não trabalha aos domingos: a folga semanal é o domingo.
-      folgaData = domingo;
+    if (colab.aceitaDomingo) {
+      // Domingo SEMPRE trabalhado → compensatória num dia útil ANTES do domingo.
+      const compData = escolherDia(diasUteis);
+      registra(compData);
+      for (const d of semana) {
+        if (d === compData) {
+          result.push({ colaboradorId: colab.id, data: d, tipo: "compensatoria" });
+        } else {
+          result.push({ colaboradorId: colab.id, data: d, tipo: "trabalho" });
+        }
+      }
     } else {
-      const candidatas = semana.map((d) => ({
-        d,
-        total: loadTotal(d),
-        cargo: loadCargo(d),
-        dom: isDomingo(d) ? 1 : 0,
-      }));
-      const validas = candidatas.filter(
-        (c) => c.total < LIMITE_FOLGA_DIA_GLOBAL && c.cargo < limCargo,
-      );
-      const pool = validas.length ? validas : candidatas;
-      pool.sort(
-        (a, b) =>
-          a.total - b.total ||
-          a.cargo - b.cargo ||
-          a.dom - b.dom ||
-          a.d.localeCompare(b.d),
-      );
-      folgaData = pool[0].d;
-    }
-    registra(folgaData);
-
-    const domingoTrabalhado =
-      colab.aceitaDomingo && !!domingo && domingo !== folgaData;
-
-    for (const d of semana) {
-      if (d === folgaData) {
+      // Não trabalha domingo → folga semanal no próprio domingo.
+      registra(domingo);
+      for (const d of semana) {
         result.push({
           colaboradorId: colab.id,
           data: d,
-          tipo: domingoTrabalhado ? "compensatoria" : "folga",
+          tipo: d === domingo ? "folga" : "trabalho",
         });
-      } else if (isDomingo(d) && !colab.aceitaDomingo) {
-        // Segurança: nunca marca trabalho em domingo para quem não aceita.
-        result.push({ colaboradorId: colab.id, data: d, tipo: "folga" });
-      } else {
-        result.push({ colaboradorId: colab.id, data: d, tipo: "trabalho" });
       }
     }
   }

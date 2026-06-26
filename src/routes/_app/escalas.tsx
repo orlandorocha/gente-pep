@@ -83,6 +83,10 @@ import {
   toISODate,
 } from "@/lib/escala-engine";
 
+import {
+  feriadosNacionaisSet,
+  mapaFeriados,
+} from "@/lib/feriados-brasil";
 import type {
   DiaTipo,
   EscalaColaborador,
@@ -139,7 +143,13 @@ function EscalasPage() {
     [version],
   );
   const dias = useMemo(() => loadDias(), [version]);
-  const feriados = useMemo(() => new Set(loadFeriados()), [version]);
+  // Feriados = nacionais brasileiros (auto) + cadastrados manualmente.
+  const feriados = useMemo(() => {
+    const set = feriadosNacionaisSet(ano);
+    for (const d of loadFeriados()) set.add(d);
+    return set;
+  }, [version, ano]);
+  const nomesFeriados = useMemo(() => mapaFeriados(ano), [ano]);
   const datas = useMemo(() => diasDoMes(ano, mes), [ano, mes]);
 
   // aplica feriados
@@ -414,18 +424,43 @@ function EscalasPage() {
                   {datas.map((d) => {
                     const dia = parseInt(d.slice(-2), 10);
                     const dom = isDomingo(d);
+                    const nomeFeriado = nomesFeriados.get(d);
+                    const ehFeriado = !!nomeFeriado;
                     return (
                       <th
                         key={d}
                         className={cn(
                           "w-9 px-1 py-2 text-center font-medium",
-                          dom && "text-red-600",
+                          dom && "bg-red-500/10 text-red-600",
+                          ehFeriado && "bg-violet-500/10 text-violet-700",
                         )}
                       >
-                        <div className="text-[10px] uppercase">
-                          {new Date(d).toLocaleString("pt-BR", { weekday: "narrow" })}
-                        </div>
-                        <div>{dia}</div>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <div className="flex flex-col items-center">
+                              <div className="text-[10px] uppercase">
+                                {new Date(d).toLocaleString("pt-BR", {
+                                  weekday: "narrow",
+                                })}
+                              </div>
+                              <div>{dia}</div>
+                              {(dom || ehFeriado) && (
+                                <div className="mt-0.5 h-1 w-1 rounded-full bg-current" />
+                              )}
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <div className="text-xs">
+                              {ehFeriado && (
+                                <div className="font-medium text-violet-600">
+                                  Feriado: {nomeFeriado}
+                                </div>
+                              )}
+                              {dom && <div className="text-red-500">Domingo</div>}
+                              {!dom && !ehFeriado && <div>Dia útil</div>}
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
                       </th>
                     );
                   })}
