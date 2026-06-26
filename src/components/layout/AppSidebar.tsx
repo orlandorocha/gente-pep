@@ -1,7 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Users, CalendarX, Plane, FileHeart,
-  CalendarClock, BellRing, ListChecks,
+  CalendarClock, BellRing, ListChecks, CalendarRange, ShieldCheck,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -13,6 +13,8 @@ import { BrandLogo } from "@/components/BrandLogo";
 const items = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Colaboradores", url: "/colaboradores", icon: Users },
+  { title: "Escalas 6x1", url: "/escalas", icon: CalendarRange },
+  { title: "Folgas & Relatórios", url: "/folgas", icon: ShieldCheck },
   { title: "Faltas", url: "/faltas", icon: CalendarX },
   { title: "Férias", url: "/ferias", icon: Plane },
   { title: "Licenças", url: "/licencas", icon: FileHeart },

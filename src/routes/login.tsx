@@ -60,24 +60,76 @@ function LoginPage() {
     toast.success("Validação concluída. Você já pode criar o acesso.");
   };
 
+  const sendReset = async (targetEmail: string) => {
+    if (!targetEmail) {
+      toast.error("Informe o e-mail para receber o link de redefinição.");
+      return;
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) toast.error(error.message);
+    else toast.success("Enviamos um link de redefinição para seu e-mail.");
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email, password,
           options: {
             emailRedirectTo: `${window.location.origin}/dashboard`,
             data: { gpid },
           },
         });
-        if (error) throw error;
+        if (error) {
+          const m = error.message.toLowerCase();
+          if (m.includes("already") || m.includes("registered") || m.includes("exists")) {
+            toast.error("Este e-mail já está cadastrado. Faça login ou redefina a senha.", {
+              action: { label: "Redefinir senha", onClick: () => sendReset(email) },
+              duration: 8000,
+            });
+            setMode("login");
+            return;
+          }
+          throw error;
+        }
+        // Se confirmação de e-mail estiver desativada, já vem sessão
+        if (data.session) {
+          toast.success("Conta criada! Redirecionando...");
+          navigate({ to: "/dashboard" });
+          return;
+        }
+        // Caso já exista (Supabase pode retornar user sem identities)
+        if (data.user && data.user.identities && data.user.identities.length === 0) {
+          toast.error("Este e-mail já está cadastrado. Faça login ou redefina a senha.", {
+            action: { label: "Redefinir senha", onClick: () => sendReset(email) },
+            duration: 8000,
+          });
+          setMode("login");
+          return;
+        }
         toast.success("Conta criada! Verifique seu e-mail para confirmar.");
         setMode("login");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        if (error) {
+          const m = error.message.toLowerCase();
+          if (m.includes("invalid login") || m.includes("invalid credentials")) {
+            toast.error("E-mail ou senha incorretos.", {
+              action: { label: "Redefinir senha", onClick: () => sendReset(email) },
+              duration: 8000,
+            });
+            return;
+          }
+          if (m.includes("not confirmed") || m.includes("confirm")) {
+            toast.error("E-mail ainda não confirmado. Verifique sua caixa de entrada.");
+            return;
+          }
+          throw error;
+        }
         toast.success("Bem-vindo ao Guardião de Gente");
         navigate({ to: "/dashboard" });
       }

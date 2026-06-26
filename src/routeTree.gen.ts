@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RecuperarRouteImport } from './routes/recuperar'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AcessoNegadoRouteImport } from './routes/acesso-negado'
@@ -16,8 +17,10 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppTarefasRouteImport } from './routes/_app/tarefas'
 import { Route as AppLicencasRouteImport } from './routes/_app/licencas'
+import { Route as AppFolgasRouteImport } from './routes/_app/folgas'
 import { Route as AppFeriasRouteImport } from './routes/_app/ferias'
 import { Route as AppFaltasRouteImport } from './routes/_app/faltas'
+import { Route as AppEscalasRouteImport } from './routes/_app/escalas'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppColaboradoresRouteImport } from './routes/_app/colaboradores'
 import { Route as AppAlertasRouteImport } from './routes/_app/alertas'
@@ -25,6 +28,11 @@ import { Route as AppAgendamentosRouteImport } from './routes/_app/agendamentos'
 import { Route as ApiPublicHooksSyncFaltasRouteImport } from './routes/api/public/hooks/sync-faltas'
 import { Route as ApiPublicFeriasDecisaoRouteImport } from './routes/api/public/ferias/decisao'
 
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RecuperarRoute = RecuperarRouteImport.update({
   id: '/recuperar',
   path: '/recuperar',
@@ -59,6 +67,11 @@ const AppLicencasRoute = AppLicencasRouteImport.update({
   path: '/licencas',
   getParentRoute: () => AppRoute,
 } as any)
+const AppFolgasRoute = AppFolgasRouteImport.update({
+  id: '/folgas',
+  path: '/folgas',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppFeriasRoute = AppFeriasRouteImport.update({
   id: '/ferias',
   path: '/ferias',
@@ -67,6 +80,11 @@ const AppFeriasRoute = AppFeriasRouteImport.update({
 const AppFaltasRoute = AppFaltasRouteImport.update({
   id: '/faltas',
   path: '/faltas',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppEscalasRoute = AppEscalasRouteImport.update({
+  id: '/escalas',
+  path: '/escalas',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
@@ -106,12 +124,15 @@ export interface FileRoutesByFullPath {
   '/acesso-negado': typeof AcessoNegadoRoute
   '/login': typeof LoginRoute
   '/recuperar': typeof RecuperarRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/agendamentos': typeof AppAgendamentosRoute
   '/alertas': typeof AppAlertasRoute
   '/colaboradores': typeof AppColaboradoresRoute
   '/dashboard': typeof AppDashboardRoute
+  '/escalas': typeof AppEscalasRoute
   '/faltas': typeof AppFaltasRoute
   '/ferias': typeof AppFeriasRoute
+  '/folgas': typeof AppFolgasRoute
   '/licencas': typeof AppLicencasRoute
   '/tarefas': typeof AppTarefasRoute
   '/api/public/ferias/decisao': typeof ApiPublicFeriasDecisaoRoute
@@ -122,12 +143,15 @@ export interface FileRoutesByTo {
   '/acesso-negado': typeof AcessoNegadoRoute
   '/login': typeof LoginRoute
   '/recuperar': typeof RecuperarRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/agendamentos': typeof AppAgendamentosRoute
   '/alertas': typeof AppAlertasRoute
   '/colaboradores': typeof AppColaboradoresRoute
   '/dashboard': typeof AppDashboardRoute
+  '/escalas': typeof AppEscalasRoute
   '/faltas': typeof AppFaltasRoute
   '/ferias': typeof AppFeriasRoute
+  '/folgas': typeof AppFolgasRoute
   '/licencas': typeof AppLicencasRoute
   '/tarefas': typeof AppTarefasRoute
   '/api/public/ferias/decisao': typeof ApiPublicFeriasDecisaoRoute
@@ -140,12 +164,15 @@ export interface FileRoutesById {
   '/acesso-negado': typeof AcessoNegadoRoute
   '/login': typeof LoginRoute
   '/recuperar': typeof RecuperarRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/_app/agendamentos': typeof AppAgendamentosRoute
   '/_app/alertas': typeof AppAlertasRoute
   '/_app/colaboradores': typeof AppColaboradoresRoute
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/escalas': typeof AppEscalasRoute
   '/_app/faltas': typeof AppFaltasRoute
   '/_app/ferias': typeof AppFeriasRoute
+  '/_app/folgas': typeof AppFolgasRoute
   '/_app/licencas': typeof AppLicencasRoute
   '/_app/tarefas': typeof AppTarefasRoute
   '/api/public/ferias/decisao': typeof ApiPublicFeriasDecisaoRoute
@@ -158,12 +185,15 @@ export interface FileRouteTypes {
     | '/acesso-negado'
     | '/login'
     | '/recuperar'
+    | '/reset-password'
     | '/agendamentos'
     | '/alertas'
     | '/colaboradores'
     | '/dashboard'
+    | '/escalas'
     | '/faltas'
     | '/ferias'
+    | '/folgas'
     | '/licencas'
     | '/tarefas'
     | '/api/public/ferias/decisao'
@@ -174,12 +204,15 @@ export interface FileRouteTypes {
     | '/acesso-negado'
     | '/login'
     | '/recuperar'
+    | '/reset-password'
     | '/agendamentos'
     | '/alertas'
     | '/colaboradores'
     | '/dashboard'
+    | '/escalas'
     | '/faltas'
     | '/ferias'
+    | '/folgas'
     | '/licencas'
     | '/tarefas'
     | '/api/public/ferias/decisao'
@@ -191,12 +224,15 @@ export interface FileRouteTypes {
     | '/acesso-negado'
     | '/login'
     | '/recuperar'
+    | '/reset-password'
     | '/_app/agendamentos'
     | '/_app/alertas'
     | '/_app/colaboradores'
     | '/_app/dashboard'
+    | '/_app/escalas'
     | '/_app/faltas'
     | '/_app/ferias'
+    | '/_app/folgas'
     | '/_app/licencas'
     | '/_app/tarefas'
     | '/api/public/ferias/decisao'
@@ -209,12 +245,20 @@ export interface RootRouteChildren {
   AcessoNegadoRoute: typeof AcessoNegadoRoute
   LoginRoute: typeof LoginRoute
   RecuperarRoute: typeof RecuperarRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   ApiPublicFeriasDecisaoRoute: typeof ApiPublicFeriasDecisaoRoute
   ApiPublicHooksSyncFaltasRoute: typeof ApiPublicHooksSyncFaltasRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/recuperar': {
       id: '/recuperar'
       path: '/recuperar'
@@ -264,6 +308,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppLicencasRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/folgas': {
+      id: '/_app/folgas'
+      path: '/folgas'
+      fullPath: '/folgas'
+      preLoaderRoute: typeof AppFolgasRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/ferias': {
       id: '/_app/ferias'
       path: '/ferias'
@@ -276,6 +327,13 @@ declare module '@tanstack/react-router' {
       path: '/faltas'
       fullPath: '/faltas'
       preLoaderRoute: typeof AppFaltasRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/escalas': {
+      id: '/_app/escalas'
+      path: '/escalas'
+      fullPath: '/escalas'
+      preLoaderRoute: typeof AppEscalasRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/dashboard': {
@@ -328,8 +386,10 @@ interface AppRouteChildren {
   AppAlertasRoute: typeof AppAlertasRoute
   AppColaboradoresRoute: typeof AppColaboradoresRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppEscalasRoute: typeof AppEscalasRoute
   AppFaltasRoute: typeof AppFaltasRoute
   AppFeriasRoute: typeof AppFeriasRoute
+  AppFolgasRoute: typeof AppFolgasRoute
   AppLicencasRoute: typeof AppLicencasRoute
   AppTarefasRoute: typeof AppTarefasRoute
 }
@@ -339,8 +399,10 @@ const AppRouteChildren: AppRouteChildren = {
   AppAlertasRoute: AppAlertasRoute,
   AppColaboradoresRoute: AppColaboradoresRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppEscalasRoute: AppEscalasRoute,
   AppFaltasRoute: AppFaltasRoute,
   AppFeriasRoute: AppFeriasRoute,
+  AppFolgasRoute: AppFolgasRoute,
   AppLicencasRoute: AppLicencasRoute,
   AppTarefasRoute: AppTarefasRoute,
 }
@@ -353,18 +415,10 @@ const rootRouteChildren: RootRouteChildren = {
   AcessoNegadoRoute: AcessoNegadoRoute,
   LoginRoute: LoginRoute,
   RecuperarRoute: RecuperarRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   ApiPublicFeriasDecisaoRoute: ApiPublicFeriasDecisaoRoute,
   ApiPublicHooksSyncFaltasRoute: ApiPublicHooksSyncFaltasRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}
