@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { Download, FileSpreadsheet } from "lucide-react";
+import { toast } from "sonner";
+import { Download, FileSpreadsheet, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -19,15 +20,42 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/PageHeader";
 import {
   loadColaboradores,
   loadDias,
   loadFeriados,
+  removerColaborador,
+  saveColaboradores,
   subscribeEscala,
 } from "@/lib/escala-store";
 import { avaliarMes } from "@/lib/escala-engine";
+import type { EscalaColaborador } from "@/lib/escala-types";
+import { AREAS } from "@/data/areas";
+import { CARGOS } from "@/data/cargos";
+import { GESTORES } from "@/data/gestores";
 
 export const Route = createFileRoute("/_app/folgas")({
   head: () => ({
@@ -48,7 +76,11 @@ function FolgasPage() {
   const [ano, setAno] = useState(hoje.getFullYear());
   const [mes, setMes] = useState(hoje.getMonth() + 1);
   const [version, setVersion] = useState(0);
-  useEffect(() => subscribeEscala(() => setVersion((v) => v + 1)), []);
+  const reload = () => setVersion((v) => v + 1);
+  useEffect(() => subscribeEscala(reload), []);
+
+  const [editColab, setEditColab] = useState<EscalaColaborador | null>(null);
+  const [delColab, setDelColab] = useState<EscalaColaborador | null>(null);
 
   const colaboradores = useMemo(() => loadColaboradores(), [version]);
   const dias = useMemo(() => loadDias(), [version]);
@@ -133,6 +165,26 @@ function FolgasPage() {
       w.document.write(html);
       w.document.close();
     }
+  }
+
+  function salvarEdicao(atualizado: EscalaColaborador) {
+    const next = colaboradores.map((c) =>
+      c.id === atualizado.id ? atualizado : c,
+    );
+    saveColaboradores(next);
+    setEditColab(null);
+    reload();
+    toast.success("Colaborador atualizado. Alterações refletidas nas Escalas 6x1.");
+  }
+
+  function confirmarExclusao() {
+    if (!delColab) return;
+    removerColaborador(delColab.id);
+    toast.success(
+      `${delColab.nome} removido das Escalas 6x1 e dos Relatórios de Folgas.`,
+    );
+    setDelColab(null);
+    reload();
   }
 
   const irreg = status.filter((s) => s.irregularidades.length > 0);
@@ -242,6 +294,7 @@ function FolgasPage() {
                 <TableHead className="text-right">Pend.</TableHead>
                 <TableHead className="text-right">Horas</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -313,6 +366,28 @@ function FolgasPage() {
                         </Badge>
                       )}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => setEditColab(c)}
+                          aria-label={`Editar ${c.nome}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-600 hover:text-red-700"
+                          onClick={() => setDelColab(c)}
+                          aria-label={`Excluir ${c.nome}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -320,6 +395,148 @@ function FolgasPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <EditarColaboradorDialog
+        colab={editColab}
+        onClose={() => setEditColab(null)}
+        onSave={salvarEdicao}
+      />
+
+      <AlertDialog
+        open={!!delColab}
+        onOpenChange={(o) => !o && setDelColab(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir colaborador?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação remove <b>{delColab?.nome}</b> dos Relatórios de Folgas e
+              também da Escala 6x1, apagando todos os dias programados. Não é
+              possível desfazer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmarExclusao}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  );
+}
+
+function EditarColaboradorDialog({
+  colab,
+  onClose,
+  onSave,
+}: {
+  colab: EscalaColaborador | null;
+  onClose: () => void;
+  onSave: (c: EscalaColaborador) => void;
+}) {
+  const [form, setForm] = useState<EscalaColaborador | null>(colab);
+
+  useEffect(() => setForm(colab), [colab]);
+
+  if (!form) return null;
+
+  return (
+    <Dialog open={!!colab} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Editar colaborador (6x1)</DialogTitle>
+          <DialogDescription>
+            As alterações são aplicadas imediatamente nas Escalas 6x1 e nos
+            relatórios.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-1.5 sm:col-span-2">
+            <Label className="text-xs">Nome</Label>
+            <Input
+              value={form.nome}
+              onChange={(e) => setForm({ ...form, nome: e.target.value })}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Cargo</Label>
+            <Select
+              value={form.cargo}
+              onValueChange={(v) => setForm({ ...form, cargo: v })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione o cargo" />
+              </SelectTrigger>
+              <SelectContent>
+                {CARGOS.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Setor / Área</Label>
+            <Select
+              value={form.setor}
+              onValueChange={(v) => setForm({ ...form, setor: v })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione a área" />
+              </SelectTrigger>
+              <SelectContent>
+                {AREAS.map((a) => (
+                  <SelectItem key={a} value={a}>
+                    {a}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5 sm:col-span-2">
+            <Label className="text-xs">Supervisor</Label>
+            <Select
+              value={form.supervisor}
+              onValueChange={(v) => setForm({ ...form, supervisor: v })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione o gestor" />
+              </SelectTrigger>
+              <SelectContent>
+                {GESTORES.map((g) => (
+                  <SelectItem key={g} value={g}>
+                    {g}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="sm:col-span-2 flex items-start justify-between gap-3 rounded-md border bg-muted/30 p-3">
+            <div>
+              <Label className="text-sm">Aceita horas extras aos domingos</Label>
+              <p className="text-[11px] text-muted-foreground">
+                Habilita escala aos domingos com folga compensatória automática.
+              </p>
+            </div>
+            <Switch
+              checked={form.aceitaDomingo}
+              onCheckedChange={(v) => setForm({ ...form, aceitaDomingo: v })}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button onClick={() => onSave(form)}>Salvar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

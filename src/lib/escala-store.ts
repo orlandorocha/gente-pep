@@ -227,6 +227,61 @@ export function upsertDia(d: DiaEscala) {
   })();
 }
 
+/** Insere/atualiza vários dias de uma só vez (1 escrita local + 1 evento). */
+export function upsertDias(novos: DiaEscala[]) {
+  if (!novos.length) return;
+  const all = loadDias();
+  const idx = new Map(all.map((x, i) => [`${x.colaboradorId}|${x.data}`, i] as const));
+  for (const d of novos) {
+    const k = `${d.colaboradorId}|${d.data}`;
+    const i = idx.get(k);
+    if (i !== undefined) all[i] = d;
+    else {
+      idx.set(k, all.length);
+      all.push(d);
+    }
+  }
+  write(KEY_DIAS, all);
+  emit();
+  void (async () => {
+    try {
+      await (supabase as any).from("escala_dias").upsert(
+        novos.map((d) => ({
+          colaborador_id: d.colaboradorId,
+          data: d.data,
+          tipo: d.tipo,
+        })),
+        { onConflict: "colaborador_id,data" },
+      );
+    } catch (err) {
+      console.warn("[escala] upsert dias (lote) falhou:", err);
+    }
+  })();
+}
+
+/** Remove um colaborador do módulo 6x1 e todos os seus dias programados. */
+export function removerColaborador(colaboradorId: string) {
+  const colabs = loadColaboradores().filter((c) => c.id !== colaboradorId);
+  const dias = loadDias().filter((d) => d.colaboradorId !== colaboradorId);
+  write(KEY_COLAB, colabs);
+  write(KEY_DIAS, dias);
+  emit();
+  void (async () => {
+    try {
+      await (supabase as any)
+        .from("escala_dias")
+        .delete()
+        .eq("colaborador_id", colaboradorId);
+      await (supabase as any)
+        .from("escala_colaboradores")
+        .delete()
+        .eq("id", colaboradorId);
+    } catch (err) {
+      console.warn("[escala] remover colaborador falhou:", err);
+    }
+  })();
+}
+
 export function removerDia(colaboradorId: string, data: string) {
   const all = loadDias().filter(
     (x) => !(x.colaboradorId === colaboradorId && x.data === data),
