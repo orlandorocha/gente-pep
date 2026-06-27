@@ -1,11 +1,13 @@
-// Motor de validação e cálculo da escala 6x1.
-// Regras (CLT + acordo coletivo padrão):
-// - Máx. 6 dias consecutivos de trabalho.
-// - Pelo menos 1 folga em cada janela de 7 dias.
-// - Domingo trabalhado só é permitido se o colaborador aceitar (aceitaDomingo).
-// - Domingo trabalhado gera obrigatoriamente 1 folga compensatória dentro de 7 dias
-//   (CLT art. 67 / Súmula 146 TST).
-// - Alertas: 5d = amarelo, 6d = vermelho, 7d = crítico (bloqueado).
+// Motor de validação e cálculo do Monitor de Jornada Contínua.
+// Regras implementadas:
+// - Controle de dias consecutivos de trabalho.
+// - Trabalho em domingo exige folga registrada antes do domingo.
+// - Cada domingo trabalhado gera folga compensatória pendente.
+// - Não é permitido novo domingo antes de utilizar a folga compensatória anterior.
+// - A partir de 5 dias consecutivos há alerta amarelo.
+// - 6 dias consecutivos → alerta laranja.
+// - 7 dias consecutivos → alerta vermelho.
+// - Acima de 7 dias → bloqueio de nova marcação de trabalho.
 
 import type {
   ColaboradorStatus,
@@ -16,28 +18,6 @@ import type {
 } from "./escala-types";
 
 export const HORAS_POR_DIA = 7.33; // 44h semanais / 6 dias
-
-/**
- * Limite GLOBAL de colaboradores que podem folgar no MESMO dia.
- * Regra de negócio: no máximo 7 pessoas de folga por dia.
- */
-export const LIMITE_FOLGA_DIA_GLOBAL = 7;
-
-/**
- * Limites de folga por dia específicos por cargo (sobrepõem o global por cargo).
- * - Operador de produção II: no máximo 2 por dia.
- * - Auxiliar de produção: no máximo 6 por dia.
- */
-export const LIMITE_FOLGA_POR_CARGO: Record<string, number> = {
-  "OPERADOR DE PRODUÇÃO II": 2,
-  "AUXILIAR DE PRODUÇÃO": 6,
-};
-
-/** Retorna o limite de folgas por dia para um cargo. */
-export function limiteFolgaCargo(cargo: string): number {
-  const key = (cargo ?? "").trim().toUpperCase();
-  return LIMITE_FOLGA_POR_CARGO[key] ?? LIMITE_FOLGA_DIA_GLOBAL;
-}
 
 export function toISODate(d: Date): string {
   const y = d.getFullYear();
@@ -68,6 +48,53 @@ export function isDomingo(s: string): boolean {
   return parseISODate(s).getDay() === 0;
 }
 
+export function isDescanso(tipo: DiaTipo): boolean {
+  return tipo === "folga" || tipo === "compensatoria" || tipo === "feriado";
+}
+
+export function temFolgaAntes(
+  idx: Map<string, DiaTipo>,
+  colaboradorId: string,
+  data: string,
+): boolean {
+  let cur = addDays(data, -1);
+  const limite = 30; // busca até 30 dias anteriores
+  let volta = 0;
+  while (volta < limite) {
+    const tipo = idx.get(`${colaboradorId}|${cur}`);
+    if (tipo && isDescanso(tipo)) return true;
+    cur = addDays(cur, -1);
+    volta++;
+  }
+  return false;
+}
+
+export function hasPendingDomingoCompensatoria(
+  idx: Map<string, DiaTipo>,
+  colaboradorId: string,
+  data: string,
+): boolean {
+  const dias: string[] = [];
+  idx.forEach((tipo, key) => {
+    const [colabId, d] = key.split("|");
+    if (colabId === colaboradorId) dias.push(d);
+  });
+  dias.sort();
+  let pending = false;
+  for (const d of dias) {
+    if (d >= data) break;
+    const tipo = idx.get(`${colaboradorId}|${d}`);
+    if (tipo === "trabalho" && isDomingo(d)) {
+      if (pending) return true;
+      pending = true;
+    }
+    if (tipo === "compensatoria" && pending) {
+      pending = false;
+    }
+  }
+  return pending;
+}
+
 export function diasDoMes(ano: number, mes: number): string[] {
   const dias: string[] = [];
   const total = new Date(ano, mes, 0).getDate();
@@ -90,6 +117,34 @@ export function getTipo(
   data: string,
 ): DiaTipo {
   return idx.get(`${colaboradorId}|${data}`) ?? "vazio";
+}
+
+export function isSabado(s: string): boolean {
+  return parseISODate(s).getDay() === 6;
+}
+
+export function gerarEscalaPadraoParaColaborador(
+  colaborador: EscalaColaborador,
+  datas: string[],
+  feriados: Set<string>,
+): DiaEscala[] {
+  const saturdays = datas.filter((data) => isSabado(data) && !feriados.has(data));
+  const saturdayFolga = saturdays[Math.floor((saturdays.length - 1) / 2)] ?? null;
+
+  return datas
+    .filter((data) => !isDomingo(data) && !feriados.has(data))
+    .map((data) => {
+      const tipo: DiaTipo = isSabado(data)
+        ? data === saturdayFolga
+          ? "folga"
+          : "trabalho"
+        : "trabalho";
+      return {
+        colaboradorId: colaborador.id,
+        data,
+        tipo,
+      };
+    });
 }
 
 /** Conta dias consecutivos de trabalho terminando em `data` (inclusiva). */
@@ -137,24 +192,33 @@ export function podeMarcarTrabalho(
   data: string,
 ): { ok: boolean; motivo?: string } {
   const colab = colaboradores?.find((c) => c.id === colaboradorId);
-  if (colab && isDomingo(data) && !colab.aceitaDomingo) {
+  if (!colab) return { ok: true };
+  const idx = indexarDias(dias);
+  idx.set(`${colaboradorId}|${data}`, "trabalho");
+
+  if (isDomingo(data) && !colab.aceitaDomingo) {
     return {
       ok: false,
       motivo:
         "Este colaborador não autorizou trabalho aos domingos. Edite o cadastro para habilitar horas extras dominicais.",
     };
   }
-  const idx = indexarDias(dias);
-  idx.set(`${colaboradorId}|${data}`, "trabalho");
-  const antes = diasConsecutivosAte(idx, colaboradorId, addDays(data, -1));
-  const depois = diasConsecutivosDe(idx, colaboradorId, addDays(data, 1));
-  const total = antes + 1 + depois;
-  if (total > 6) {
-    return {
-      ok: false,
-      motivo:
-        "Programação inválida. O colaborador excederia o limite legal de 6 dias consecutivos.",
-    };
+
+  if (isDomingo(data)) {
+    if (!temFolgaAntes(idx, colaboradorId, data)) {
+      return {
+        ok: false,
+        motivo:
+          "Não é permitido trabalhar no domingo sem ter usufruído de uma folga antes deste domingo.",
+      };
+    }
+    if (hasPendingDomingoCompensatoria(idx, colaboradorId, data)) {
+      return {
+        ok: false,
+        motivo:
+          "Já existe um domingo anterior com folga compensatória pendente. Use a compensatória antes de escalar outro domingo.",
+      };
+    }
   }
   return { ok: true };
 }
@@ -179,6 +243,7 @@ export function avaliarMes(
     let diasTrab = 0;
     let folgasSemanais = 0;
     let compensatoriasUsadas = 0;
+    let compensatoriasGeradas = 0;
     // Pendências de domingos trabalhados aguardando compensação
     const pendentes: { domingo: string; prazo: string }[] = [];
     // Créditos de compensatórias programadas ANTES de um domingo trabalhado
@@ -253,6 +318,7 @@ export function avaliarMes(
       } else if (tipo === "compensatoria") {
         consecutivos = 0;
         ultimaFolga = d;
+        compensatoriasGeradas++;
         // Prioriza quitar uma pendência aberta (compensação posterior ao domingo)
         if (pendentes.length) {
           pendentes.shift();
@@ -304,6 +370,9 @@ export function avaliarMes(
       ultimaFolga,
       proximaFolgaObrigatoria,
       compensatoriasPendentes: pendentes.length,
+      compensatoriasGeradas,
+      compensatoriasUtilizadas: compensatoriasUsadas,
+      impedidoProximoDomingo: pendentes.length > 0,
       proximoVencimentoCompensatoria,
       domingosTrabalhadosMes: domingosTrab,
       diasTrabalhadosMes: diasTrab,
@@ -357,122 +426,6 @@ export function sugerirFolgaCompensatoria(
   return candidatas[0]?.data ?? null;
 }
 
-/**
- * Gera AUTOMATICAMENTE a escala 6x1 de um colaborador recém-cadastrado,
- * distribuindo as folgas semanais de forma a respeitar os limites de
- * colaboradores em folga por dia (global e por cargo).
- *
- * Regras aplicadas (semanas alinhadas de SEGUNDA a DOMINGO):
- * - Trabalha 6 dias e folga 1 por semana.
- * - Quando NÃO aceita domingo: a folga semanal recai no domingo (nunca trabalha).
- * - Quando ACEITA domingo: o domingo é SEMPRE trabalhado e a folga da semana é
- *   marcada como "compensatória" e alocada OBRIGATORIAMENTE em um dia útil
- *   ANTES do domingo (segunda a sábado) — CLT art. 67 / Súmula 146 TST.
- * - A folga/compensatória é alocada no dia com MENOR ocupação que ainda respeite
- *   o limite global ({@link LIMITE_FOLGA_DIA_GLOBAL}) e o do cargo
- *   ({@link limiteFolgaCargo}). Se nenhum dia respeitar, escolhe o menos cheio.
- *
- * @param colab            colaborador para o qual gerar a escala
- * @param outrosColabs     demais colaboradores (para mapear cargo -> contagem)
- * @param diasExistentes   dias já programados de todos (para contar ocupação)
- * @param inicioISO        data inicial (ISO) — idealmente o 1º dia do mês
- * @param semanas          quantidade de semanas a gerar (padrão 9 ≈ 2 meses)
- */
-export function gerarEscala6x1(
-  colab: EscalaColaborador,
-  outrosColabs: EscalaColaborador[],
-  diasExistentes: DiaEscala[],
-  inicioISO: string,
-  semanas = 9,
-): DiaEscala[] {
-  const cargoDe = new Map(outrosColabs.map((c) => [c.id, (c.cargo ?? "").toUpperCase()]));
-  const cargoUp = (colab.cargo ?? "").toUpperCase();
-  const limCargo = limiteFolgaCargo(colab.cargo);
-
-  // Ocupação de folgas por data: total e por cargo.
-  const totalPorData = new Map<string, number>();
-  const cargoPorData = new Map<string, Map<string, number>>();
-  for (const d of diasExistentes) {
-    if (d.tipo !== "folga" && d.tipo !== "compensatoria") continue;
-    totalPorData.set(d.data, (totalPorData.get(d.data) ?? 0) + 1);
-    const cg = cargoDe.get(d.colaboradorId) ?? "";
-    let m = cargoPorData.get(d.data);
-    if (!m) {
-      m = new Map();
-      cargoPorData.set(d.data, m);
-    }
-    m.set(cg, (m.get(cg) ?? 0) + 1);
-  }
-
-  const loadTotal = (data: string) => totalPorData.get(data) ?? 0;
-  const loadCargo = (data: string) => cargoPorData.get(data)?.get(cargoUp) ?? 0;
-  const registra = (data: string) => {
-    totalPorData.set(data, loadTotal(data) + 1);
-    let m = cargoPorData.get(data);
-    if (!m) {
-      m = new Map();
-      cargoPorData.set(data, m);
-    }
-    m.set(cargoUp, loadCargo(data) + 1);
-  };
-
-  // Escolhe o melhor dia (menor ocupação respeitando limites) dentro de uma lista.
-  const escolherDia = (dias: string[]): string => {
-    const candidatas = dias.map((d) => ({
-      d,
-      total: loadTotal(d),
-      cargo: loadCargo(d),
-    }));
-    const validas = candidatas.filter(
-      (c) => c.total < LIMITE_FOLGA_DIA_GLOBAL && c.cargo < limCargo,
-    );
-    const pool = validas.length ? validas : candidatas;
-    pool.sort(
-      (a, b) => a.total - b.total || a.cargo - b.cargo || a.d.localeCompare(b.d),
-    );
-    return pool[0].d;
-  };
-
-  // Alinha o início na SEGUNDA-feira da semana de `inicioISO` (domingo = último dia).
-  const diaSemanaInicio = parseISODate(inicioISO).getDay(); // 0=dom..6=sáb
-  const offsetSegunda = diaSemanaInicio === 0 ? -6 : 1 - diaSemanaInicio;
-  const primeiraSegunda = addDays(inicioISO, offsetSegunda);
-
-  const result: DiaEscala[] = [];
-
-  for (let w = 0; w < semanas; w++) {
-    // semana[0..5] = seg..sáb, semana[6] = domingo
-    const semana: string[] = [];
-    for (let i = 0; i < 7; i++) semana.push(addDays(primeiraSegunda, w * 7 + i));
-    const domingo = semana[6];
-    const diasUteis = semana.slice(0, 6); // seg a sáb (todos antes do domingo)
-
-    if (colab.aceitaDomingo) {
-      // Domingo SEMPRE trabalhado → compensatória num dia útil ANTES do domingo.
-      const compData = escolherDia(diasUteis);
-      registra(compData);
-      for (const d of semana) {
-        if (d === compData) {
-          result.push({ colaboradorId: colab.id, data: d, tipo: "compensatoria" });
-        } else {
-          result.push({ colaboradorId: colab.id, data: d, tipo: "trabalho" });
-        }
-      }
-    } else {
-      // Não trabalha domingo → folga semanal no próprio domingo.
-      registra(domingo);
-      for (const d of semana) {
-        result.push({
-          colaboradorId: colab.id,
-          data: d,
-          tipo: d === domingo ? "folga" : "trabalho",
-        });
-      }
-    }
-  }
-
-  return result;
-}
 
 /**
  * Sugere a melhor data para programar a folga compensatória ANTES de um

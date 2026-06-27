@@ -13,8 +13,7 @@ import { BrandLogo } from "@/components/BrandLogo";
 const items = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Colaboradores", url: "/colaboradores", icon: Users },
-  { title: "Escalas 6x1", url: "/escalas", icon: CalendarRange },
-  { title: "Folgas & Relatórios", url: "/folgas", icon: ShieldCheck },
+  { title: "Monitor de Jornada Contínua", url: "/escalas", icon: CalendarRange },
   { title: "Faltas", url: "/faltas", icon: CalendarX },
   { title: "Férias", url: "/ferias", icon: Plane },
   { title: "Licenças", url: "/licencas", icon: FileHeart },

@@ -9,12 +9,20 @@ import {
 } from "@/components/ui/command";
 import type { ColaboradorRow } from "@/hooks/useData";
 
+export type CollaboratorOption = {
+  id: string;
+  nome: string;
+  matricula: string;
+  gpid?: string;
+  area?: string;
+};
+
 export function ColaboradorSelect({
   value, onChange, colaboradores, label = "Colaborador",
 }: {
   value: string;
   onChange: (v: string) => void;
-  colaboradores: ColaboradorRow[];
+  colaboradores: CollaboratorOption[];
   label?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -48,21 +56,22 @@ export function ColaboradorSelect({
               itemValue.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
             }
           >
-            <CommandInput placeholder="Buscar por nome ou GPID..." />
+            <CommandInput placeholder="Buscar por nome, matrícula, GPID ou área..." />
             <CommandList>
               <CommandEmpty>Nenhum colaborador encontrado.</CommandEmpty>
               <CommandGroup>
                 {colaboradores.map((c) => (
                   <CommandItem
                     key={c.id}
-                    value={`${c.nome} ${c.gpid} ${c.area}`}
+                    value={`${c.nome} ${c.matricula} ${c.gpid ?? ""} ${c.area ?? ""}`}
                     onSelect={() => { onChange(c.id); setOpen(false); }}
                   >
                     <Check className={cn("mr-2 h-4 w-4", value === c.id ? "opacity-100" : "opacity-0")} />
                     <div className="flex flex-col">
                       <span className="font-medium">{c.nome}</span>
                       <span className="text-xs text-muted-foreground">
-                        GPID {c.gpid} · {c.area}
+                        {c.gpid ? `GPID ${c.gpid}` : `Matrícula ${c.matricula}`}
+                        {c.area ? ` · ${c.area}` : ""}
                       </span>
                     </div>
                   </CommandItem>

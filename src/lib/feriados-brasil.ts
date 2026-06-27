@@ -1,5 +1,5 @@
 // Feriados nacionais brasileiros (fixos + móveis baseados na Páscoa).
-// Usado para identificar automaticamente dias não úteis no calendário 6x1.
+// Usado para identificar automaticamente dias não úteis no monitor de Jornada Contínua.
 
 import { toISODate } from "./escala-engine";
 

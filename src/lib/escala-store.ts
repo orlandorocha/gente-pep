@@ -1,4 +1,4 @@
-// Store do módulo 6x1.
+// Store do módulo de Jornada Contínua.
 // API síncrona apoiada em cache local + sincronização com Supabase em segundo plano.
 // - Lê/escreve imediatamente em localStorage (UX rápida + offline).
 // - Hidrata em background a partir de Supabase (escala_colaboradores, escala_dias,
@@ -7,12 +7,18 @@
 // - Permite IMPORTAR colaboradores do sistema principal (tabela `colaboradores`).
 
 import { supabase } from "@/integrations/supabase/client";
-import type { DiaEscala, DiaTipo, EscalaColaborador } from "./escala-types";
+import type {
+  DiaEscala,
+  DiaTipo,
+  EscalaColaborador,
+} from "./escala-types";
 import { addDays, toISODate } from "./escala-engine";
 
-const KEY_COLAB = "escala6x1.colaboradores";
-const KEY_DIAS = "escala6x1.dias";
-const KEY_FERIADOS = "escala6x1.feriados";
+const KEY_PREFIX = "monitor-jornada";
+const KEY_COLAB = `${KEY_PREFIX}.colaboradores`;
+const KEY_DIAS = `${KEY_PREFIX}.dias`;
+const KEY_FERIADOS = `${KEY_PREFIX}.feriados`;
+const KEY_SUPABASE_AVAILABLE = `${KEY_PREFIX}.supabase-escala-available`;
 const EVT = "escala:updated";
 
 function read<T>(key: string, fallback: T): T {
@@ -41,51 +47,79 @@ function seed(): {
   dias: DiaEscala[];
   feriados: string[];
 } {
-  const colaboradores: EscalaColaborador[] = [
-    { id: "c1", nome: "Ana Beatriz Souza",     matricula: "0001", cargo: "Atendente",  setor: "Loja A",    supervisor: "Marcos Pereira", admissao: "2023-04-15", escala: "6x1", aceitaDomingo: true  },
-    { id: "c2", nome: "Carlos Henrique Lima",  matricula: "0002", cargo: "Caixa",      setor: "Loja A",    supervisor: "Marcos Pereira", admissao: "2022-09-01", escala: "6x1", aceitaDomingo: false },
-    { id: "c3", nome: "Daniela Martins",       matricula: "0003", cargo: "Estoquista", setor: "Logística", supervisor: "Renata Alves",   admissao: "2024-01-10", escala: "6x1", aceitaDomingo: true  },
-    { id: "c4", nome: "Eduardo Nunes",         matricula: "0004", cargo: "Atendente",  setor: "Loja B",    supervisor: "Felipe Castro",  admissao: "2021-11-22", escala: "6x1", aceitaDomingo: true  },
-    { id: "c5", nome: "Fernanda Oliveira",     matricula: "0005", cargo: "Caixa",      setor: "Loja B",    supervisor: "Felipe Castro",  admissao: "2023-07-05", escala: "6x1", aceitaDomingo: false },
-  ];
-
-  const dias: DiaEscala[] = [];
-  const hoje = new Date();
-  hoje.setDate(1);
-  for (const c of colaboradores) {
-    const offset = parseInt(c.matricula, 10) % 7;
-    for (let i = 0; i < 60; i++) {
-      const data = toISODate(new Date(hoje.getFullYear(), hoje.getMonth(), 1 + i));
-      const ciclo = (i + offset) % 7;
-      let tipo: DiaTipo = "trabalho";
-      if (ciclo === 6) tipo = "folga";
-      dias.push({ colaboradorId: c.id, data, tipo });
-    }
-  }
-  return { colaboradores, dias, feriados: [] };
+  return {
+    colaboradores: [],
+    dias: [],
+    feriados: [],
+  };
 }
 
 function ensureSeed() {
   const existing = read<EscalaColaborador[] | null>(KEY_COLAB, null);
-  if (existing && existing.length) {
-    // Migração: garante o campo aceitaDomingo
-    if (existing.some((c) => typeof c.aceitaDomingo !== "boolean")) {
-      const migrated = existing.map((c) => ({ ...c, aceitaDomingo: c.aceitaDomingo ?? false }));
-      write(KEY_COLAB, migrated);
-    }
-    return;
+  const dias = read<DiaEscala[] | null>(KEY_DIAS, null);
+  const feriados = read<string[] | null>(KEY_FERIADOS, null);
+
+  let updated = false;
+  if (!existing) {
+    write(KEY_COLAB, []);
+    updated = true;
+  } else if (existing.some((c) => typeof c.aceitaDomingo !== "boolean")) {
+    const migrated = existing.map((c) => ({ ...c, aceitaDomingo: c.aceitaDomingo ?? false }));
+    write(KEY_COLAB, migrated);
+    updated = true;
   }
-  const s = seed();
-  write(KEY_COLAB, s.colaboradores);
-  write(KEY_DIAS, s.dias);
-  write(KEY_FERIADOS, s.feriados);
+  if (!dias) {
+    write(KEY_DIAS, []);
+    updated = true;
+  }
+  if (!feriados) {
+    write(KEY_FERIADOS, []);
+    updated = true;
+  }
+  if (updated) emit();
 }
 
 // ====================== Hidratação Supabase ======================
 let hydratePromise: Promise<void> | null = null;
+let supabaseEscalaAvailable = true;
+
+function readSupabaseEscalaAvailable(): boolean {
+  if (typeof window === "undefined") return true;
+  return read<boolean>(KEY_SUPABASE_AVAILABLE, true);
+}
+
+function persistSupabaseEscalaAvailable(value: boolean) {
+  if (typeof window === "undefined") return;
+  write(KEY_SUPABASE_AVAILABLE, value);
+}
+
+supabaseEscalaAvailable = readSupabaseEscalaAvailable();
+
+function disableSupabaseEscala() {
+  if (!supabaseEscalaAvailable) return;
+  supabaseEscalaAvailable = false;
+  persistSupabaseEscalaAvailable(false);
+  console.warn(
+    "[escala] Supabase de escala indisponível. Operações remotas de escala serão desativadas.",
+  );
+}
+
+function isEscalaTableNotFound(error: any) {
+  const message = String(error?.message ?? error ?? "").toLowerCase();
+  const details = String(error?.details ?? "").toLowerCase();
+  return (
+    error?.status === 404 ||
+    error?.statusCode === 404 ||
+    error?.code === "404" ||
+    message.includes("could not find the table") ||
+    message.includes("not found") ||
+    message.includes("404") ||
+    details.includes("not found")
+  );
+}
 
 async function hydrateFromSupabase(): Promise<void> {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || !supabaseEscalaAvailable) return;
   try {
     const [colabRes, diasRes, ferRes] = await Promise.all([
       (supabase as any).from("escala_colaboradores").select("*"),
@@ -94,6 +128,13 @@ async function hydrateFromSupabase(): Promise<void> {
     ]);
 
     if (colabRes.error || diasRes.error || ferRes.error) {
+      if (
+        isEscalaTableNotFound(colabRes.error) ||
+        isEscalaTableNotFound(diasRes.error) ||
+        isEscalaTableNotFound(ferRes.error)
+      ) {
+        disableSupabaseEscala();
+      }
       console.warn("[escala] Hidratação Supabase indisponível, usando cache local.", {
         colab: colabRes.error?.message,
         dias: diasRes.error?.message,
@@ -109,8 +150,9 @@ async function hydrateFromSupabase(): Promise<void> {
       cargo: r.cargo ?? "",
       setor: r.setor ?? "",
       supervisor: r.supervisor ?? "",
+      turno: (r.turno ?? "Manhã") as any,
       admissao: r.admissao,
-      escala: "6x1",
+      escala: "jornada",
       aceitaDomingo: !!r.aceita_domingo,
     }));
     const dias: DiaEscala[] = (diasRes.data ?? []).map((r: any) => ({
@@ -132,6 +174,7 @@ async function hydrateFromSupabase(): Promise<void> {
 }
 
 export function syncEscala(): Promise<void> {
+  if (!supabaseEscalaAvailable) return Promise.resolve();
   if (!hydratePromise) hydratePromise = hydrateFromSupabase();
   return hydratePromise;
 }
@@ -168,6 +211,7 @@ export function saveColaboradores(list: EscalaColaborador[]) {
   write(KEY_COLAB, list);
   emit();
   void (async () => {
+    if (!supabaseEscalaAvailable) return;
     try {
       const payload = list.map((c) => ({
         id: c.id,
@@ -176,14 +220,35 @@ export function saveColaboradores(list: EscalaColaborador[]) {
         cargo: c.cargo,
         setor: c.setor,
         supervisor: c.supervisor,
+        turno: c.turno,
         admissao: c.admissao,
         aceita_domingo: c.aceitaDomingo,
       }));
-      await (supabase as any).from("escala_colaboradores").upsert(payload, { onConflict: "id" });
+      const res = await (supabase as any).from("escala_colaboradores").upsert(payload, { onConflict: "id" });
+      if (res.error && isEscalaTableNotFound(res.error)) {
+        disableSupabaseEscala();
+      }
     } catch (err) {
+      if (isEscalaTableNotFound(err)) disableSupabaseEscala();
       console.warn("[escala] upsert colaboradores falhou:", err);
     }
   })();
+}
+
+export function upsertColaborador(colaborador: EscalaColaborador) {
+  const list = loadColaboradores();
+  const index = list.findIndex((item) => item.id === colaborador.id);
+  if (index >= 0) list[index] = colaborador;
+  else list.push(colaborador);
+  saveColaboradores(list);
+}
+
+export function addColaborador(colaborador: EscalaColaborador) {
+  const list = loadColaboradores();
+  if (!list.some((item) => item.id === colaborador.id)) {
+    list.push(colaborador);
+    saveColaboradores(list);
+  }
 }
 
 export function saveDias(list: DiaEscala[]) {
@@ -195,12 +260,23 @@ export function saveFeriados(list: string[]) {
   write(KEY_FERIADOS, list);
   emit();
   void (async () => {
+    if (!supabaseEscalaAvailable) return;
     try {
-      await (supabase as any).from("escala_feriados").delete().neq("data", "0001-01-01");
+      const res1 = await (supabase as any).from("escala_feriados").delete().neq("data", "0001-01-01");
+      if (res1.error && isEscalaTableNotFound(res1.error)) {
+        disableSupabaseEscala();
+        return;
+      }
       if (list.length > 0) {
-        await (supabase as any).from("escala_feriados").insert(list.map((d) => ({ data: d })));
+        const res2 = await (supabase as any)
+          .from("escala_feriados")
+          .insert(list.map((d) => ({ data: d })));
+        if (res2.error && isEscalaTableNotFound(res2.error)) {
+          disableSupabaseEscala();
+        }
       }
     } catch (err) {
+      if (isEscalaTableNotFound(err)) disableSupabaseEscala();
       console.warn("[escala] sync feriados falhou:", err);
     }
   })();
@@ -216,12 +292,15 @@ export function upsertDia(d: DiaEscala) {
   write(KEY_DIAS, all);
   emit();
   void (async () => {
+    if (!supabaseEscalaAvailable) return;
     try {
-      await (supabase as any).from("escala_dias").upsert(
+      const res = await (supabase as any).from("escala_dias").upsert(
         { colaborador_id: d.colaboradorId, data: d.data, tipo: d.tipo },
         { onConflict: "colaborador_id,data" },
       );
+      if (res.error && isEscalaTableNotFound(res.error)) disableSupabaseEscala();
     } catch (err) {
+      if (isEscalaTableNotFound(err)) disableSupabaseEscala();
       console.warn("[escala] upsert dia falhou:", err);
     }
   })();
@@ -231,7 +310,7 @@ export function upsertDia(d: DiaEscala) {
 export function upsertDias(novos: DiaEscala[]) {
   if (!novos.length) return;
   const all = loadDias();
-  const idx = new Map(all.map((x, i) => [`${x.colaboradorId}|${x.data}`, i] as const));
+  const idx = new Map<string, number>(all.map((x, i) => [`${x.colaboradorId}|${x.data}`, i] as const));
   for (const d of novos) {
     const k = `${d.colaboradorId}|${d.data}`;
     const i = idx.get(k);
@@ -244,8 +323,9 @@ export function upsertDias(novos: DiaEscala[]) {
   write(KEY_DIAS, all);
   emit();
   void (async () => {
+    if (!supabaseEscalaAvailable) return;
     try {
-      await (supabase as any).from("escala_dias").upsert(
+      const res = await (supabase as any).from("escala_dias").upsert(
         novos.map((d) => ({
           colaborador_id: d.colaboradorId,
           data: d.data,
@@ -253,13 +333,15 @@ export function upsertDias(novos: DiaEscala[]) {
         })),
         { onConflict: "colaborador_id,data" },
       );
+      if (res.error && isEscalaTableNotFound(res.error)) disableSupabaseEscala();
     } catch (err) {
+      if (isEscalaTableNotFound(err)) disableSupabaseEscala();
       console.warn("[escala] upsert dias (lote) falhou:", err);
     }
   })();
 }
 
-/** Remove um colaborador do módulo 6x1 e todos os seus dias programados. */
+/** Remove um colaborador do módulo de Jornada Contínua e todos os seus dias programados. */
 export function removerColaborador(colaboradorId: string) {
   const colabs = loadColaboradores().filter((c) => c.id !== colaboradorId);
   const dias = loadDias().filter((d) => d.colaboradorId !== colaboradorId);
@@ -267,16 +349,23 @@ export function removerColaborador(colaboradorId: string) {
   write(KEY_DIAS, dias);
   emit();
   void (async () => {
+    if (!supabaseEscalaAvailable) return;
     try {
-      await (supabase as any)
+      const res1 = await (supabase as any)
         .from("escala_dias")
         .delete()
         .eq("colaborador_id", colaboradorId);
-      await (supabase as any)
+      if (res1.error && isEscalaTableNotFound(res1.error)) {
+        disableSupabaseEscala();
+        return;
+      }
+      const res2 = await (supabase as any)
         .from("escala_colaboradores")
         .delete()
         .eq("id", colaboradorId);
+      if (res2.error && isEscalaTableNotFound(res2.error)) disableSupabaseEscala();
     } catch (err) {
+      if (isEscalaTableNotFound(err)) disableSupabaseEscala();
       console.warn("[escala] remover colaborador falhou:", err);
     }
   })();
@@ -289,13 +378,16 @@ export function removerDia(colaboradorId: string, data: string) {
   write(KEY_DIAS, all);
   emit();
   void (async () => {
+    if (!supabaseEscalaAvailable) return;
     try {
-      await (supabase as any)
+      const res = await (supabase as any)
         .from("escala_dias")
         .delete()
         .eq("colaborador_id", colaboradorId)
         .eq("data", data);
+      if (res.error && isEscalaTableNotFound(res.error)) disableSupabaseEscala();
     } catch (err) {
+      if (isEscalaTableNotFound(err)) disableSupabaseEscala();
       console.warn("[escala] delete dia falhou:", err);
     }
   })();
@@ -322,14 +414,26 @@ export function resetarDemo() {
   window.localStorage.removeItem(KEY_COLAB);
   window.localStorage.removeItem(KEY_DIAS);
   window.localStorage.removeItem(KEY_FERIADOS);
+  persistSupabaseEscalaAvailable(true);
+  supabaseEscalaAvailable = true;
   hydratePromise = null;
-  // Limpa também os dados remotos do módulo 6x1 para evitar que
+  // Limpa também os dados remotos do módulo de jornada para evitar que
   // colaboradores antigos voltem na próxima hidratação.
   void (async () => {
+    if (!supabaseEscalaAvailable) return;
     try {
-      await (supabase as any).from("escala_dias").delete().neq("data", "0001-01-01");
-      await (supabase as any).from("escala_colaboradores").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      const res1 = await (supabase as any).from("escala_dias").delete().neq("data", "0001-01-01");
+      if (res1.error && isEscalaTableNotFound(res1.error)) {
+        disableSupabaseEscala();
+        return;
+      }
+      const res2 = await (supabase as any)
+        .from("escala_colaboradores")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000");
+      if (res2.error && isEscalaTableNotFound(res2.error)) disableSupabaseEscala();
     } catch (err) {
+      if (isEscalaTableNotFound(err)) disableSupabaseEscala();
       console.warn("[escala] reset remoto falhou:", err);
     }
   })();
@@ -339,8 +443,8 @@ export function resetarDemo() {
 
 /**
  * Importa colaboradores ATIVOS do sistema principal (`colaboradores` + `gestores`)
- * para o módulo 6x1. Faz match por `gpid` (usado como matrícula). Não duplica
- * registros já existentes — apenas adiciona novos.
+ * para o módulo de Jornada Contínua. Faz match por `gpid` (usado como matrícula).
+ * Não duplica registros já existentes — apenas adiciona novos.
  * Retorna { importados, jaExistiam }.
  */
 export async function importarDoSistemaPrincipal(): Promise<{
@@ -379,8 +483,9 @@ export async function importarDoSistemaPrincipal(): Promise<{
       cargo: r.cargo ?? "",
       setor: r.area ?? "",
       supervisor: gestores[r.gestor_id] ?? "",
+      turno: (r.turno ?? "Manhã") as any,
       admissao: toISODate(new Date()),
-      escala: "6x1",
+      escala: "jornada",
       aceitaDomingo: false,
     });
     importados++;
@@ -391,7 +496,8 @@ export async function importarDoSistemaPrincipal(): Promise<{
 
 export { addDays };
 
-/** Item da base principal usado nos dropdowns do módulo 6x1. */
+import type { Turno } from "./escala-types";
+
 export type ColaboradorBase = {
   id: string;
   nome: string;
@@ -399,11 +505,12 @@ export type ColaboradorBase = {
   cargo: string;
   setor: string;
   supervisor: string;
+  turno: Turno;
 };
 
 /**
  * Lê a base principal de colaboradores ATIVOS para popular o dropdown
- * "Nome" no cadastro do módulo 6x1.
+ * "Nome" no cadastro do módulo de Jornada Contínua.
  */
 export async function fetchColaboradoresBase(): Promise<ColaboradorBase[]> {
   try {
@@ -425,6 +532,7 @@ export async function fetchColaboradoresBase(): Promise<ColaboradorBase[]> {
       cargo: r.cargo ?? "",
       setor: r.area ?? "",
       supervisor: gestores[r.gestor_id] ?? "",
+      turno: (r.turno ?? "Manhã") as any,
     }));
   } catch (err) {
     console.warn("[escala] fetchColaboradoresBase falhou:", err);

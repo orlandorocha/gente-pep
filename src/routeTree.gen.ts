@@ -17,7 +17,6 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppTarefasRouteImport } from './routes/_app/tarefas'
 import { Route as AppLicencasRouteImport } from './routes/_app/licencas'
-import { Route as AppFolgasRouteImport } from './routes/_app/folgas'
 import { Route as AppFeriasRouteImport } from './routes/_app/ferias'
 import { Route as AppFaltasRouteImport } from './routes/_app/faltas'
 import { Route as AppEscalasRouteImport } from './routes/_app/escalas'
@@ -65,11 +64,6 @@ const AppTarefasRoute = AppTarefasRouteImport.update({
 const AppLicencasRoute = AppLicencasRouteImport.update({
   id: '/licencas',
   path: '/licencas',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppFolgasRoute = AppFolgasRouteImport.update({
-  id: '/folgas',
-  path: '/folgas',
   getParentRoute: () => AppRoute,
 } as any)
 const AppFeriasRoute = AppFeriasRouteImport.update({
@@ -132,7 +126,6 @@ export interface FileRoutesByFullPath {
   '/escalas': typeof AppEscalasRoute
   '/faltas': typeof AppFaltasRoute
   '/ferias': typeof AppFeriasRoute
-  '/folgas': typeof AppFolgasRoute
   '/licencas': typeof AppLicencasRoute
   '/tarefas': typeof AppTarefasRoute
   '/api/public/ferias/decisao': typeof ApiPublicFeriasDecisaoRoute
@@ -151,7 +144,6 @@ export interface FileRoutesByTo {
   '/escalas': typeof AppEscalasRoute
   '/faltas': typeof AppFaltasRoute
   '/ferias': typeof AppFeriasRoute
-  '/folgas': typeof AppFolgasRoute
   '/licencas': typeof AppLicencasRoute
   '/tarefas': typeof AppTarefasRoute
   '/api/public/ferias/decisao': typeof ApiPublicFeriasDecisaoRoute
@@ -172,7 +164,6 @@ export interface FileRoutesById {
   '/_app/escalas': typeof AppEscalasRoute
   '/_app/faltas': typeof AppFaltasRoute
   '/_app/ferias': typeof AppFeriasRoute
-  '/_app/folgas': typeof AppFolgasRoute
   '/_app/licencas': typeof AppLicencasRoute
   '/_app/tarefas': typeof AppTarefasRoute
   '/api/public/ferias/decisao': typeof ApiPublicFeriasDecisaoRoute
@@ -193,7 +184,6 @@ export interface FileRouteTypes {
     | '/escalas'
     | '/faltas'
     | '/ferias'
-    | '/folgas'
     | '/licencas'
     | '/tarefas'
     | '/api/public/ferias/decisao'
@@ -212,7 +202,6 @@ export interface FileRouteTypes {
     | '/escalas'
     | '/faltas'
     | '/ferias'
-    | '/folgas'
     | '/licencas'
     | '/tarefas'
     | '/api/public/ferias/decisao'
@@ -232,7 +221,6 @@ export interface FileRouteTypes {
     | '/_app/escalas'
     | '/_app/faltas'
     | '/_app/ferias'
-    | '/_app/folgas'
     | '/_app/licencas'
     | '/_app/tarefas'
     | '/api/public/ferias/decisao'
@@ -306,13 +294,6 @@ declare module '@tanstack/react-router' {
       path: '/licencas'
       fullPath: '/licencas'
       preLoaderRoute: typeof AppLicencasRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/folgas': {
-      id: '/_app/folgas'
-      path: '/folgas'
-      fullPath: '/folgas'
-      preLoaderRoute: typeof AppFolgasRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/ferias': {
@@ -389,7 +370,6 @@ interface AppRouteChildren {
   AppEscalasRoute: typeof AppEscalasRoute
   AppFaltasRoute: typeof AppFaltasRoute
   AppFeriasRoute: typeof AppFeriasRoute
-  AppFolgasRoute: typeof AppFolgasRoute
   AppLicencasRoute: typeof AppLicencasRoute
   AppTarefasRoute: typeof AppTarefasRoute
 }
@@ -402,7 +382,6 @@ const AppRouteChildren: AppRouteChildren = {
   AppEscalasRoute: AppEscalasRoute,
   AppFaltasRoute: AppFaltasRoute,
   AppFeriasRoute: AppFeriasRoute,
-  AppFolgasRoute: AppFolgasRoute,
   AppLicencasRoute: AppLicencasRoute,
   AppTarefasRoute: AppTarefasRoute,
 }

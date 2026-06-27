@@ -1,4 +1,4 @@
-// Tipos do módulo de Controle de Folgas e Escala 6x1
+// Tipos do módulo de Controle de Jornada Contínua
 
 export type DiaTipo =
   | "trabalho"      // Verde: trabalhando
@@ -7,6 +7,8 @@ export type DiaTipo =
   | "feriado"       // Cinza
   | "vazio";        // não programado
 
+export type Turno = "Manhã" | "Tarde" | "Noite";
+
 export interface EscalaColaborador {
   id: string;
   nome: string;
@@ -14,15 +16,24 @@ export interface EscalaColaborador {
   cargo: string;
   setor: string;
   supervisor: string;
+  turno: Turno;
   admissao: string; // ISO date
-  escala: "6x1";
+  escala: string;
   /**
-   * Indica se o colaborador concorda em realizar horas extras aos domingos.
+   * Indica se o colaborador concorda em realizar trabalho aos domingos.
    * Quando false, o sistema bloqueia qualquer marcação de "trabalho" em domingos.
-   * Quando true, cada domingo trabalhado gera obrigatoriamente 1 folga
-   * compensatória dentro de 7 dias (CLT art. 67 e Súmula 146 TST).
    */
   aceitaDomingo: boolean;
+}
+
+export interface ColaboradorBase {
+  id: string;
+  nome: string;
+  matricula: string;
+  cargo: string;
+  setor: string;
+  supervisor: string;
+  turno: Turno;
 }
 
 export interface DiaEscala {
@@ -44,6 +55,9 @@ export interface ColaboradorStatus {
   ultimaFolga: string | null;
   proximaFolgaObrigatoria: string | null;
   compensatoriasPendentes: number;
+  compensatoriasGeradas: number;
+  compensatoriasUtilizadas: number;
+  impedidoProximoDomingo: boolean;
   /** Data limite (ISO) para conceder a próxima folga compensatória pendente. */
   proximoVencimentoCompensatoria: string | null;
   domingosTrabalhadosMes: number;

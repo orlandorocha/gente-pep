@@ -4,26 +4,23 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   CalendarDays,
-  Check,
   CheckCircle2,
-  ChevronsUpDown,
-  Plus,
+  Download,
+  Edit3,
+  Printer,
   RefreshCw,
+  Search,
   Sparkles,
   Star,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ColaboradorSelect } from "@/components/forms/ColaboradorSelect";
 import {
   Select,
   SelectContent,
@@ -31,80 +28,65 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
 import { PageHeader } from "@/components/PageHeader";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { formatDateBr } from "@/lib/date";
 import {
-  fetchColaboradoresBase,
-  loadColaboradores,
-  loadDias,
-  loadFeriados,
-  novaMatricula,
-  novoColaboradorId,
-  removerDia,
-  resetarDemo,
-  saveColaboradores,
-  subscribeEscala,
-  upsertDia,
-  upsertDias,
-  type ColaboradorBase,
-} from "@/lib/escala-store";
-
-import {
-  addDays,
   avaliarMes,
   diasDoMes,
-  gerarEscala6x1,
+  gerarEscalaPadraoParaColaborador,
   isDomingo,
-  limiteFolgaCargo,
   podeMarcarTrabalho,
   sugerirFolgaCompensatoria,
   sugerirFolgaCompensatoriaAntes,
   toISODate,
 } from "@/lib/escala-engine";
-
 import {
   feriadosNacionaisSet,
   mapaFeriados,
 } from "@/lib/feriados-brasil";
-import type {
-  DiaTipo,
-  EscalaColaborador,
-} from "@/lib/escala-types";
+import {
+  fetchColaboradoresBase,
+  loadColaboradores,
+  loadDias,
+  loadFeriados,
+  novoColaboradorId,
+  novaMatricula,
+  removerColaborador,
+  removerDia,
+  subscribeEscala,
+  upsertColaborador,
+  upsertDia,
+  upsertDias,
+} from "@/lib/escala-store";
+import { downloadXlsx } from "@/lib/xlsx-utils";
+import type { ColaboradorBase, DiaTipo, EscalaColaborador } from "@/lib/escala-types";
 import { cn } from "@/lib/utils";
-import { AREAS } from "@/data/areas";
-import { CARGOS } from "@/data/cargos";
-import { GESTORES } from "@/data/gestores";
-
+import { useAuth } from "@/hooks/useAuth";
 
 export const Route = createFileRoute("/_app/escalas")({
   head: () => ({
     meta: [
-      { title: "Escalas 6x1 — Guardião de Gente" },
+      { title: "Monitor de Jornada Contínua — Guardião de Gente" },
       {
         name: "description",
         content:
-          "Controle de folgas, escala 6x1 e folgas compensatórias de domingo.",
+          "Controle moderno de jornadas contínuas com alertas de dias consecutivos e compensação dominical.",
       },
     ],
   }),
@@ -131,182 +113,462 @@ const TIPO_CLASS: Record<DiaTipo, string> = {
 
 function EscalasPage() {
   const hoje = new Date();
+  const { user } = useAuth();
   const [ano, setAno] = useState(hoje.getFullYear());
   const [mes, setMes] = useState(hoje.getMonth() + 1);
-  const [version, setVersion] = useState(0);
-  const reload = () => setVersion((v) => v + 1);
-  useEffect(() => subscribeEscala(reload), []);
+  const [tick, setTick] = useState(0);
+  const [mounted, setMounted] = useState(false);
 
+  useEffect(() => {
+    setMounted(true);
+    return subscribeEscala(() => setTick((value) => value + 1));
+  }, []);
 
-  const colaboradores = useMemo<EscalaColaborador[]>(
-    () => loadColaboradores(),
-    [version],
-  );
-  const dias = useMemo(() => loadDias(), [version]);
-  // Feriados = nacionais brasileiros (auto) + cadastrados manualmente.
+  const colaboradores = useMemo(() => (mounted ? loadColaboradores() : []), [tick, mounted]);
+  const dias = useMemo(() => (mounted ? loadDias() : []), [tick, mounted]);
   const feriados = useMemo(() => {
     const set = feriadosNacionaisSet(ano);
-    for (const d of loadFeriados()) set.add(d);
+    if (mounted) {
+      for (const data of loadFeriados()) set.add(data);
+    }
     return set;
-  }, [version, ano]);
+  }, [tick, ano, mounted]);
   const nomesFeriados = useMemo(() => mapaFeriados(ano), [ano]);
   const datas = useMemo(() => diasDoMes(ano, mes), [ano, mes]);
 
-  // aplica feriados
   const diasComFeriado = useMemo(() => {
-    const arr = [...dias];
-    for (const d of datas) {
-      if (feriados.has(d)) {
-        for (const c of colaboradores) {
-          const idx = arr.findIndex(
-            (x) => x.colaboradorId === c.id && x.data === d,
-          );
-          if (idx >= 0) arr[idx] = { ...arr[idx], tipo: "feriado" };
-          else arr.push({ colaboradorId: c.id, data: d, tipo: "feriado" });
+    const merged = [...dias];
+    const existing = new Set(merged.map((item) => `${item.colaboradorId}|${item.data}`));
+
+    for (const data of datas) {
+      if (!feriados.has(data)) continue;
+      for (const colaborador of colaboradores) {
+        const key = `${colaborador.id}|${data}`;
+        if (!existing.has(key)) {
+          merged.push({ colaboradorId: colaborador.id, data, tipo: "feriado" });
         }
       }
     }
-    return arr;
+
+    return merged;
   }, [dias, datas, colaboradores, feriados]);
 
-  const { status } = useMemo(
+  const { status, issues } = useMemo(
     () => avaliarMes(colaboradores, diasComFeriado, ano, mes),
     [colaboradores, diasComFeriado, ano, mes],
   );
 
   const statusMap = useMemo(
-    () => new Map(status.map((s) => [s.colaboradorId, s] as const)),
+    () => new Map(status.map((item) => [item.colaboradorId, item] as const)),
     [status],
   );
 
-  const [novoColab, setNovoColab] = useState<EscalaColaborador | null>(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    | "all"
+    | "ok"
+    | "amarelo"
+    | "vermelho"
+    | "critico"
+  >("all");
+  const [baseColaboradores, setBaseColaboradores] = useState<ColaboradorBase[]>([]);
+  const [selectedBaseId, setSelectedBaseId] = useState("");
+  const [sortBy, setSortBy] = useState<
+    | "alerta"
+    | "nome"
+    | "consecutivos"
+    | "pendentes"
+  >("alerta");
 
-  // Dashboard counters
-  const hojeISO = toISODate(new Date());
-  const trabalhandoHoje = colaboradores.filter((c) =>
+  const filteredColaboradores = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return colaboradores.filter((colaborador) => {
+      const text = [
+        colaborador.nome,
+        colaborador.matricula,
+        colaborador.cargo,
+        colaborador.setor,
+        colaborador.supervisor,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      const matchesText = text.includes(normalized);
+      const matchesStatus =
+        statusFilter === "all" ||
+        statusMap.get(colaborador.id)?.alertNivel === statusFilter;
+
+      return matchesText && matchesStatus;
+    });
+  }, [colaboradores, query, statusFilter, statusMap]);
+
+  const sortedColaboradores = useMemo(() => {
+    return [...filteredColaboradores].sort((a, b) => {
+      const aStatus = statusMap.get(a.id);
+      const bStatus = statusMap.get(b.id);
+
+      if (sortBy === "nome") {
+        return a.nome.localeCompare(b.nome, "pt-BR");
+      }
+
+      if (sortBy === "consecutivos") {
+        return (
+          (bStatus?.diasConsecutivos ?? 0) -
+          (aStatus?.diasConsecutivos ?? 0)
+        );
+      }
+
+      if (sortBy === "pendentes") {
+        return (
+          (bStatus?.compensatoriasPendentes ?? 0) -
+          (aStatus?.compensatoriasPendentes ?? 0)
+        );
+      }
+
+      const order = { critico: 0, vermelho: 1, amarelo: 2, ok: 3 } as const;
+      return (
+        (order[aStatus?.alertNivel ?? "ok"] ?? 4) -
+        (order[bStatus?.alertNivel ?? "ok"] ?? 4) ||
+        a.nome.localeCompare(b.nome, "pt-BR")
+      );
+    });
+  }, [filteredColaboradores, sortBy, statusMap]);
+
+  const hojeISO = toISODate(hoje);
+  const trabalhandoHoje = colaboradores.filter((colaborador) =>
     diasComFeriado.some(
-      (d) =>
-        d.colaboradorId === c.id && d.data === hojeISO && d.tipo === "trabalho",
+      (dia) =>
+        dia.colaboradorId === colaborador.id &&
+        dia.data === hojeISO &&
+        dia.tipo === "trabalho",
     ),
   ).length;
-  const folgaHoje = colaboradores.filter((c) =>
+  const folgaHoje = colaboradores.filter((colaborador) =>
     diasComFeriado.some(
-      (d) =>
-        d.colaboradorId === c.id &&
-        d.data === hojeISO &&
-        (d.tipo === "folga" || d.tipo === "compensatoria"),
+      (dia) =>
+        dia.colaboradorId === colaborador.id &&
+        dia.data === hojeISO &&
+        (dia.tipo === "folga" || dia.tipo === "compensatoria"),
     ),
   ).length;
-  const totalCompPend = status.reduce(
-    (a, s) => a + s.compensatoriasPendentes,
+  const totalPendencias = status.reduce(
+    (acc, item) => acc + item.compensatoriasPendentes,
     0,
   );
   const totalDomingos = status.reduce(
-    (a, s) => a + s.domingosTrabalhadosMes,
+    (acc, item) => acc + item.domingosTrabalhadosMes,
     0,
   );
-  const proximosLimite = status.filter(
-    (s) => s.alertNivel === "amarelo" || s.alertNivel === "vermelho",
-  ).length;
-  const criticos = status.filter((s) => s.alertNivel === "critico").length;
+  const totalErros = issues.filter((issue) => issue.level === "error").length;
+  const totalAvisos = issues.filter((issue) => issue.level === "warn").length;
 
-  function handleClickDia(colab: EscalaColaborador, data: string) {
-    const atual = diasComFeriado.find(
-      (d) => d.colaboradorId === colab.id && d.data === data,
+  const [colaboradorDialogOpen, setColaboradorDialogOpen] = useState(false);
+  const [colaboradorDraft, setColaboradorDraft] = useState<EscalaColaborador | null>(null);
+
+  useEffect(() => {
+    fetchColaboradoresBase().then(setBaseColaboradores).catch(() => setBaseColaboradores([]));
+  }, []);
+
+  const reload = () => setTick((value) => value + 1);
+
+  const abrirNovoColaborador = () => {
+    setSelectedBaseId("");
+    setColaboradorDraft({
+      id: novoColaboradorId(),
+      nome: "",
+      matricula: novaMatricula(colaboradores),
+      cargo: "",
+      setor: "",
+      supervisor: "",
+      turno: "Manhã",
+      admissao: hojeISO,
+      escala: "jornada",
+      aceitaDomingo: false,
+    });
+    setColaboradorDialogOpen(true);
+  };
+
+  const handleEditColaborador = (colaborador: EscalaColaborador) => {
+    setSelectedBaseId(colaborador.id);
+    setColaboradorDraft({ ...colaborador });
+    setColaboradorDialogOpen(true);
+  };
+
+  const gerarEscalaPadrao = (colaborador: EscalaColaborador) => {
+    const novosDias = gerarEscalaPadraoParaColaborador(colaborador, datas, feriados);
+    if (novosDias.length) {
+      upsertDias(novosDias);
+      toast.success(
+        `Escala padrão gerada para ${colaborador.nome} (${novosDias.length} dias).`,
+      );
+    }
+  };
+
+  const exportDomingosXlsx = () => {
+    const domingos = diasComFeriado.filter(
+      (dia) => isDomingo(dia.data) && dia.tipo === "trabalho",
     );
-    const cur: DiaTipo = atual?.tipo ?? "vazio";
-    // Ciclo: vazio -> trabalho -> folga -> compensatoria -> vazio
+    if (domingos.length === 0) {
+      toast.error("Nenhum domingo escalado para exportar.");
+      return;
+    }
+
+    const rows = domingos
+      .map((dia) => {
+        const colaborador = colaboradores.find((c) => c.id === dia.colaboradorId);
+        if (!colaborador) return null;
+        return {
+          Nome: colaborador.nome,
+          GPID: colaborador.matricula,
+          Cargo: colaborador.cargo,
+          Setor: colaborador.setor,
+          Turno: colaborador.turno,
+          Data: formatDateBr(dia.data),
+        };
+      })
+      .filter(Boolean) as Record<string, any>[];
+
+    downloadXlsx(
+      rows,
+      "Domingos",
+      `domingos-escalados-${ano}-${String(mes).padStart(2, "0")}.xlsx`,
+    );
+  };
+
+  const exportDomingosPdf = () => {
+    const domingos = diasComFeriado.filter(
+      (dia) => isDomingo(dia.data) && dia.tipo === "trabalho",
+    );
+    if (domingos.length === 0) {
+      toast.error("Nenhum domingo escalado para imprimir.");
+      return;
+    }
+
+    const rows = domingos
+      .map((dia) => {
+        const colaborador = colaboradores.find((c) => c.id === dia.colaboradorId);
+        if (!colaborador) return null;
+        return {
+          nome: colaborador.nome,
+          gpid: colaborador.matricula,
+          cargo: colaborador.cargo,
+          setor: colaborador.setor,
+          turno: colaborador.turno,
+          data: formatDateBr(dia.data),
+        };
+      })
+      .filter(Boolean) as Array<{
+        nome: string;
+        gpid: string;
+        cargo: string;
+        setor: string;
+        turno: string;
+        data: string;
+      }>;
+
+    const win = window.open("", "_blank", "width=1024,height=768");
+    if (!win) {
+      toast.error("Permita pop-ups para gerar o PDF.");
+      return;
+    }
+
+    const titulo = `Domingos escalados — ${new Date().toLocaleString("pt-BR", {
+      month: "long",
+      year: "numeric",
+    })}`;
+    const emitidoEm = new Date().toLocaleString("pt-BR");
+    const linhas = rows
+      .map(
+        (row) => `
+          <tr>
+            <td>${row.nome}</td>
+            <td>${row.gpid}</td>
+            <td>${row.cargo}</td>
+            <td>${row.setor}</td>
+            <td>${row.turno}</td>
+            <td>${row.data}</td>
+          </tr>`,
+      )
+      .join("");
+
+    win.document.write(`<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>${titulo}</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 24px; }
+      h1 { font-size: 18px; margin-bottom: 8px; }
+      .meta { font-size: 12px; color: #555; margin-bottom: 16px; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+      thead th { background: #f3f4f6; }
+      tbody tr:nth-child(even) { background: #fafafa; }
+      .total { margin-top: 12px; font-size: 12px; color: #555; }
+      @media print { body { margin: 12mm; } }
+    </style>
+  </head>
+  <body>
+    <h1>${titulo}</h1>
+    <div class="meta">
+      <div><strong>Emitido em:</strong> ${emitidoEm}</div>
+      <div><strong>Total de domingos:</strong> ${rows.length}</div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Colaborador</th>
+          <th>GPID</th>
+          <th>Cargo</th>
+          <th>Setor</th>
+          <th>Turno</th>
+          <th>Data</th>
+        </tr>
+      </thead>
+      <tbody>${linhas}</tbody>
+    </table>
+    <div class="total">Total de registros: ${rows.length}</div>
+    <script>
+      window.onload = function () { window.focus(); window.print(); };
+    </script>
+  </body>
+</html>`);
+    win.document.close();
+  };
+
+  const handleDeleteColaborador = (colaboradorId: string, nome: string) => {
+    if (!window.confirm(`Remover ${nome} do módulo de jornada?`)) return;
+    removerColaborador(colaboradorId);
+    toast.success(`${nome} removido.`);
+    reload();
+  };
+
+  const handleSaveColaborador = () => {
+    if (!colaboradorDraft) return;
+    if (!colaboradorDraft.nome.trim()) {
+      toast.error("Nome do colaborador é obrigatório.");
+      return;
+    }
+    if (!colaboradorDraft.matricula.trim()) {
+      toast.error("Matrícula é obrigatória.");
+      return;
+    }
+    const isNew = !colaboradores.some((item) => item.id === colaboradorDraft.id);
+    upsertColaborador(colaboradorDraft);
+    if (isNew) {
+      gerarEscalaPadrao(colaboradorDraft);
+    }
+    toast.success(`Colaborador ${colaboradorDraft.nome} salvo.`);
+    setColaboradorDialogOpen(false);
+    setColaboradorDraft(null);
+    reload();
+  };
+
+  const selectBaseColaborador = (id: string) => {
+    setSelectedBaseId(id);
+    const base = baseColaboradores.find((item) => item.id === id);
+    if (!base || !colaboradorDraft) return;
+    setColaboradorDraft({
+      ...colaboradorDraft,
+      id: base.id,
+      nome: base.nome,
+      matricula: base.matricula,
+      cargo: base.cargo,
+      setor: base.setor,
+      supervisor: base.supervisor,
+      turno: base.turno,
+    });
+  };
+
+  const showAlertDetails = () => {
+    if (!issues.length) {
+      toast.success("Nenhuma irregularidade detectada.");
+      return;
+    }
+    const topIssues = issues.slice(0, 3).map((issue) => `• ${issue.data} – ${issue.message}`).join("\n");
+    toast(`Alertas detectados:\n${topIssues}${issues.length > 3 ? `\n+ ${issues.length - 3} restantes` : ""}`);
+  };
+
+  function handleToggleDia(colaborador: EscalaColaborador, data: string) {
+    const atual = diasComFeriado.find(
+      (dia) => dia.colaboradorId === colaborador.id && dia.data === data,
+    );
+    const atualTipo: DiaTipo = atual?.tipo ?? "vazio";
     const proximo: DiaTipo =
-      cur === "vazio"
+      atualTipo === "vazio"
         ? "trabalho"
-        : cur === "trabalho"
-          ? "folga"
-          : cur === "folga"
-            ? "compensatoria"
-            : "vazio";
+        : atualTipo === "trabalho"
+        ? "folga"
+        : atualTipo === "folga"
+        ? "compensatoria"
+        : "vazio";
 
     if (proximo === "trabalho") {
-      const v = podeMarcarTrabalho(colaboradores, diasComFeriado, colab.id, data);
-      if (!v.ok) {
-        toast.error(v.motivo!);
+      const validacao = podeMarcarTrabalho(
+        colaboradores,
+        diasComFeriado,
+        colaborador.id,
+        data,
+      );
+      if (!validacao.ok) {
+        toast.error(validacao.motivo ?? "Operação não permitida.");
         return;
       }
     }
+
     if (proximo === "vazio") {
-      removerDia(colab.id, data);
+      removerDia(colaborador.id, data);
     } else {
-      upsertDia({ colaboradorId: colab.id, data, tipo: proximo });
+      upsertDia({ colaboradorId: colaborador.id, data, tipo: proximo });
     }
 
-    // Auto-programa folga compensatória ANTES do domingo trabalhado (CLT art. 67).
-    if (proximo === "trabalho" && isDomingo(data) && colab.aceitaDomingo) {
-      const jaTemComp = diasComFeriado.some(
-        (d) =>
-          d.colaboradorId === colab.id &&
-          d.tipo === "compensatoria" &&
-          Math.abs(
-            (new Date(d.data).getTime() - new Date(data).getTime()) / 86400000,
-          ) <= 6,
+    if (
+      proximo === "trabalho" &&
+      isDomingo(data) &&
+      colaborador.aceitaDomingo
+    ) {
+      const sugestao = sugerirFolgaCompensatoriaAntes(
+        colaboradores,
+        diasComFeriado,
+        colaborador.id,
+        data,
       );
-      if (!jaTemComp) {
-        const sugest = sugerirFolgaCompensatoriaAntes(
-          colaboradores,
-          diasComFeriado,
-          colab.id,
-          data,
+      if (sugestao) {
+        upsertDia({
+          colaboradorId: colaborador.id,
+          data: sugestao,
+          tipo: "compensatoria",
+        });
+        toast.success(
+          `Folga compensatória sugerida para ${colaborador.nome} em ${sugestao}.`,
         );
-        if (sugest) {
-          upsertDia({ colaboradorId: colab.id, data: sugest, tipo: "compensatoria" });
-          toast.success(
-            `Folga compensatória programada em ${sugest} (antes do domingo ${data}).`,
-          );
-        } else {
-          toast.warning(
-            `Domingo trabalhado sem janela disponível para compensar antes — pendência criada (prazo 7 dias).`,
-          );
-        }
+      } else {
+        toast.warning(
+          "Domingo registrado. Avalie uma compensatória dentro do prazo legal.",
+        );
       }
     }
+
     reload();
   }
 
-
-  function sugerirComp(colab: EscalaColaborador) {
+  function sugerirComp(colaborador: EscalaColaborador) {
     const data = sugerirFolgaCompensatoria(
       colaboradores,
       diasComFeriado,
-      colab.id,
+      colaborador.id,
       hojeISO,
       14,
     );
+
     if (!data) {
-      toast.message("Sem janela ideal nos próximos 14 dias.");
+      toast.error("Sem janela ideal nos próximos 14 dias.");
       return;
     }
-    upsertDia({ colaboradorId: colab.id, data, tipo: "compensatoria" });
-    toast.success(
-      `Folga compensatória sugerida para ${colab.nome} em ${data}.`,
-    );
-    reload();
-  }
 
-  function adicionarColaborador(c: EscalaColaborador) {
-    const next = [...colaboradores, c];
-    saveColaboradores(next);
-
-    // Gera automaticamente a escala 6x1 do novo colaborador a partir do 1º dia
-    // do mês visível, distribuindo folgas conforme os limites por dia/cargo.
-    const inicio = toISODate(new Date(ano, mes - 1, 1));
-    const gerados = gerarEscala6x1(c, colaboradores, dias, inicio, 9);
-    if (gerados.length) {
-      upsertDias(gerados);
-      const folgas = gerados.filter(
-        (d) => d.tipo === "folga" || d.tipo === "compensatoria",
-      ).length;
-      toast.success(
-        `Escala 6x1 gerada para ${c.nome}: ${folgas} folgas distribuídas (limite ${limiteFolgaCargo(c.cargo)}/dia para ${c.cargo}).`,
-      );
-    }
+    upsertDia({ colaboradorId: colaborador.id, data, tipo: "compensatoria" });
+    toast.success(`Folga compensatória sugerida para ${colaborador.nome} em ${data}.`);
     reload();
   }
 
@@ -314,104 +576,145 @@ function EscalasPage() {
     <TooltipProvider delayDuration={150}>
       <div className="space-y-6">
         <PageHeader
-          title="Escalas 6x1"
-          description="Calendário mensal, validação automática e folgas compensatórias."
+          title="Monitor de Jornada Contínua"
+          description="Controle de escalas com validação de dias consecutivos, domingos e folgas compensatórias."
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              <Select
-                value={String(mes)}
-                onValueChange={(v) => setMes(Number(v))}
-              >
+              <Select value={String(mes)} onValueChange={(value) => setMes(Number(value))}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-                    <SelectItem key={m} value={String(m)}>
-                      {new Date(2000, m - 1, 1).toLocaleString("pt-BR", {
+                  {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {new Date(2000, value - 1, 1).toLocaleString("pt-BR", {
                         month: "long",
                       })}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <Select
-                value={String(ano)}
-                onValueChange={(v) => setAno(Number(v))}
-              >
+              <Select value={String(ano)} onValueChange={(value) => setAno(Number(value))}>
                 <SelectTrigger className="w-[110px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {[ano - 1, ano, ano + 1].map((a) => (
-                    <SelectItem key={a} value={String(a)}>
-                      {a}
+                  {[ano - 1, ano, ano + 1].map((value) => (
+                    <SelectItem key={value} value={String(value)}>
+                      {value}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <NovoColaboradorDialog
-                onCreate={adicionarColaborador}
-                colaboradores={colaboradores}
-                open={!!novoColab}
-                setOpen={(o) => setNovoColab(o ? ({} as EscalaColaborador) : null)}
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  resetarDemo();
-                  reload();
-                  toast.success("Demo reiniciada.");
-                }}
-              >
+              <Button variant="outline" size="sm" onClick={abrirNovoColaborador}>
+                <Edit3 className="mr-2 h-4 w-4" />
+                Novo colaborador
+              </Button>
+              <Button variant="outline" size="sm" onClick={exportDomingosXlsx}>
+                <Download className="mr-2 h-4 w-4" />
+                Domingos XLSX
+              </Button>
+              <Button variant="outline" size="sm" onClick={exportDomingosPdf}>
+                <Printer className="mr-2 h-4 w-4" />
+                Domingos PDF
+              </Button>
+              <Button variant="ghost" size="sm" onClick={reload}>
                 <RefreshCw className="mr-2 h-4 w-4" />
-                Reset
+                Atualizar
               </Button>
             </div>
           }
         />
 
-        {/* KPIs */}
         <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
           <Kpi label="Colaboradores" value={colaboradores.length} />
           <Kpi label="Trabalhando hoje" value={trabalhandoHoje} tone="emerald" />
           <Kpi label="Em folga hoje" value={folgaHoje} tone="sky" />
           <Kpi
             label="Folgas comp. pendentes"
-            value={totalCompPend}
-            tone={totalCompPend ? "orange" : "default"}
+            value={totalPendencias}
+            tone={totalPendencias ? "orange" : "default"}
           />
           <Kpi label="Domingos trabalhados" value={totalDomingos} />
           <Kpi
-            label="Próx. do limite"
-            value={proximosLimite + criticos}
-            tone={criticos ? "red" : proximosLimite ? "amber" : "default"}
+            label="Alertas"
+            value={totalErros + totalAvisos}
+            tone={totalErros ? "red" : totalAvisos ? "amber" : "default"}
           />
         </div>
 
-        {/* Legenda */}
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <Legend cls={TIPO_CLASS.trabalho} label="Trabalho" />
-          <Legend cls={TIPO_CLASS.folga} label="Folga semanal" />
-          <Legend cls={TIPO_CLASS.compensatoria} label="Folga compensatória" />
-          <Legend cls={TIPO_CLASS.feriado} label="Feriado" />
-          <Legend cls="bg-red-500/20 text-red-700 border-red-500/40" label="Irregularidade" />
-          <span className="ml-2">
-            • Clique em um dia para alternar: Trabalho → Folga → Compensatória → Vazio
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <Button variant="ghost" size="sm" onClick={showAlertDetails}>
+            <AlertTriangle className="mr-2 h-4 w-4 text-amber-500" />
+            Ver alertas
+          </Button>
+          <span className="rounded-full border border-border px-2 py-1 text-xs font-medium text-foreground">
+            {totalErros} erros · {totalAvisos} avisos
           </span>
         </div>
 
-        {/* Calendário */}
+        <Card className="p-4">
+          <div className="grid gap-3 lg:grid-cols-[minmax(240px,_1fr)_auto_auto]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-10"
+                placeholder="Buscar colaborador, matrícula, cargo..."
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                Filtrar status
+              </Label>
+              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as any)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Todos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="ok">OK</SelectItem>
+                  <SelectItem value="amarelo">5 dias</SelectItem>
+                  <SelectItem value="vermelho">6 dias</SelectItem>
+                  <SelectItem value="critico">Crítico</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                Ordenar por
+              </Label>
+              <Select value={sortBy} onValueChange={(value) => setSortBy(value as any)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Alerta" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="alerta">Alerta</SelectItem>
+                  <SelectItem value="nome">Nome</SelectItem>
+                  <SelectItem value="consecutivos">Dias seguidos</SelectItem>
+                  <SelectItem value="pendentes">Pendências</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </Card>
+
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          <Legend cls={TIPO_CLASS.trabalho} label="Trabalho" />
+          <Legend cls={TIPO_CLASS.folga} label="Folga semanal" />
+          <Legend cls={TIPO_CLASS.compensatoria} label="Folga compensatória" />
+          <Legend cls="bg-red-500/20 text-red-700 border-red-500/40" label="Irregularidade" />
+          <span className="ml-2">
+            Clique em um dia para alternar entre Trabalho, Folga, Compensatória e Limpar.
+          </span>
+        </div>
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CalendarDays className="h-5 w-5" />
-              Calendário —{" "}
-              {new Date(ano, mes - 1, 1).toLocaleString("pt-BR", {
-                month: "long",
-                year: "numeric",
-              })}
+              Calendário mensal
             </CardTitle>
           </CardHeader>
           <CardContent className="overflow-auto">
@@ -421,46 +724,25 @@ function EscalasPage() {
                   <th className="sticky left-0 z-10 min-w-[240px] bg-card px-3 py-2 text-left font-medium">
                     Colaborador
                   </th>
-                  {datas.map((d) => {
-                    const dia = parseInt(d.slice(-2), 10);
-                    const dom = isDomingo(d);
-                    const nomeFeriado = nomesFeriados.get(d);
-                    const ehFeriado = !!nomeFeriado;
+                  {datas.map((data) => {
+                    const dia = parseInt(data.slice(-2), 10);
+                    const domingo = isDomingo(data);
+                    const nomeFeriado = nomesFeriados.get(data);
+                    const ehFeriado = Boolean(nomeFeriado);
                     return (
                       <th
-                        key={d}
+                        key={data}
                         className={cn(
                           "w-9 px-1 py-2 text-center font-medium",
-                          dom && "bg-red-500/10 text-red-600",
+                          domingo && "bg-red-500/10 text-red-600",
                           ehFeriado && "bg-violet-500/10 text-violet-700",
                         )}
                       >
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="flex flex-col items-center">
-                              <div className="text-[10px] uppercase">
-                                {new Date(d).toLocaleString("pt-BR", {
-                                  weekday: "narrow",
-                                })}
-                              </div>
-                              <div>{dia}</div>
-                              {(dom || ehFeriado) && (
-                                <div className="mt-0.5 h-1 w-1 rounded-full bg-current" />
-                              )}
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <div className="text-xs">
-                              {ehFeriado && (
-                                <div className="font-medium text-violet-600">
-                                  Feriado: {nomeFeriado}
-                                </div>
-                              )}
-                              {dom && <div className="text-red-500">Domingo</div>}
-                              {!dom && !ehFeriado && <div>Dia útil</div>}
-                            </div>
-                          </TooltipContent>
-                        </Tooltip>
+                        <div className="flex flex-col items-center text-[10px] uppercase">
+                          <div>{new Date(data).toLocaleString("pt-BR", { weekday: "narrow" })}</div>
+                          <div>{dia}</div>
+                          {(domingo || ehFeriado) && <div className="mt-0.5 h-1 w-1 rounded-full bg-current" />}
+                        </div>
                       </th>
                     );
                   })}
@@ -470,49 +752,40 @@ function EscalasPage() {
                 </tr>
               </thead>
               <tbody>
-                {colaboradores.map((c) => {
-                  const st = statusMap.get(c.id);
+                {sortedColaboradores.map((colaborador) => {
+                  const statusItem = statusMap.get(colaborador.id);
                   return (
-                    <tr key={c.id} className="border-t align-middle">
+                    <tr key={colaborador.id} className="border-t align-middle">
                       <td className="sticky left-0 z-10 h-12 bg-card px-3 py-2 align-middle">
-                        <div className="flex items-center gap-2 font-medium text-foreground">
-                          {c.nome}
-                          {c.aceitaDomingo && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Badge
-                                  variant="outline"
-                                  className="gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 py-0 text-[10px] text-amber-700"
-                                >
-                                  <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
-                                  Dom
-                                </Badge>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                Aceita horas extras aos domingos
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground">
-                          {c.matricula} · {c.cargo} · {c.setor}
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2 font-medium text-foreground">
+                            {colaborador.nome}
+                            {colaborador.aceitaDomingo && (
+                              <Badge className="gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 py-0 text-[10px] text-amber-700">
+                                <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
+                                Dom
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {colaborador.matricula} · {colaborador.cargo} · {colaborador.setor} · {colaborador.turno}
+                          </div>
                         </div>
                       </td>
-                      {datas.map((d) => {
+                      {datas.map((data) => {
                         const dia = diasComFeriado.find(
-                          (x) => x.colaboradorId === c.id && x.data === d,
+                          (item) => item.colaboradorId === colaborador.id && item.data === data,
                         );
                         const tipo: DiaTipo = dia?.tipo ?? "vazio";
-                        const irregular =
-                          st?.irregularidades.some(
-                            (i) => i.data === d && i.level === "error",
-                          ) ?? false;
+                        const irregular = statusItem?.irregularidades.some(
+                          (issue) => issue.data === data && issue.level === "error",
+                        );
                         return (
-                          <td key={d} className="px-0.5 py-0.5">
+                          <td key={data} className="px-0.5 py-0.5">
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <button
-                                  onClick={() => handleClickDia(c, d)}
+                                  onClick={() => handleToggleDia(colaborador, data)}
                                   className={cn(
                                     "h-9 w-9 rounded-md border text-[10px] font-semibold transition-colors",
                                     TIPO_CLASS[tipo],
@@ -523,22 +796,20 @@ function EscalasPage() {
                                   {tipo === "trabalho"
                                     ? "T"
                                     : tipo === "folga"
-                                      ? "F"
-                                      : tipo === "compensatoria"
-                                        ? "FC"
-                                        : tipo === "feriado"
-                                          ? "H"
-                                          : ""}
+                                    ? "F"
+                                    : tipo === "compensatoria"
+                                    ? "FC"
+                                    : tipo === "feriado"
+                                    ? "H"
+                                    : ""}
                                 </button>
                               </TooltipTrigger>
                               <TooltipContent>
                                 <div className="text-xs">
-                                  <div className="font-medium">{d}</div>
+                                  <div className="font-medium">{data}</div>
                                   <div>{TIPO_LABEL[tipo]}</div>
                                   {irregular && (
-                                    <div className="text-red-500">
-                                      Irregularidade detectada
-                                    </div>
+                                    <div className="text-red-500">Irregularidade detectada</div>
                                   )}
                                 </div>
                               </TooltipContent>
@@ -547,16 +818,34 @@ function EscalasPage() {
                         );
                       })}
                       <td className="sticky right-0 z-10 bg-card px-2 py-2 text-center">
-                        <StatusBadge nivel={st?.alertNivel ?? "ok"} />
-                        {st && st.compensatoriasPendentes > 0 && (
-                          <button
-                            onClick={() => sugerirComp(c)}
-                            className="mt-1 inline-flex items-center gap-1 text-[10px] text-orange-600 hover:underline"
-                          >
-                            <Sparkles className="h-3 w-3" />
-                            {st.compensatoriasPendentes} pend.
-                          </button>
-                        )}
+                        <div className="flex flex-col items-center gap-2">
+                          <StatusBadge nivel={statusItem?.alertNivel ?? "ok"} />
+                          {statusItem?.compensatoriasPendentes ? (
+                            <button
+                              onClick={() => sugerirComp(colaborador)}
+                              className="inline-flex items-center gap-1 rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-[10px] text-orange-700 transition hover:bg-orange-100"
+                            >
+                              <Sparkles className="h-3 w-3" />
+                              {statusItem.compensatoriasPendentes}
+                            </button>
+                          ) : null}
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleEditColaborador(colaborador)}
+                              className="rounded-md border border-border bg-muted px-2 py-1 text-muted-foreground transition hover:bg-muted/80"
+                              aria-label={`Editar ${colaborador.nome}`}
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteColaborador(colaborador.id, colaborador.nome)}
+                              className="rounded-md border border-border bg-muted px-2 py-1 text-muted-foreground transition hover:bg-muted/80"
+                              aria-label={`Excluir ${colaborador.nome}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -566,70 +855,157 @@ function EscalasPage() {
           </CardContent>
         </Card>
 
-        {/* Irregularidades */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
-              Irregularidades e Alertas
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {status.every((s) => s.irregularidades.length === 0) ? (
-              <p className="flex items-center gap-2 text-sm text-emerald-600">
-                <CheckCircle2 className="h-4 w-4" /> Nenhuma irregularidade no
-                período.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {status.map((s) => {
-                  if (!s.irregularidades.length) return null;
-                  const colab = colaboradores.find(
-                    (c) => c.id === s.colaboradorId,
-                  )!;
-                  return (
-                    <div
-                      key={s.colaboradorId}
-                      className="rounded-md border bg-card/50 p-3"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="font-medium">{colab.nome}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {colab.matricula} · {colab.setor}
-                          </div>
-                        </div>
-                        <StatusBadge nivel={s.alertNivel} />
-                      </div>
-                      <ul className="mt-2 space-y-1 text-xs">
-                        {s.irregularidades.map((i, k) => (
-                          <li
-                            key={k}
-                            className={cn(
-                              "flex items-start gap-2",
-                              i.level === "error"
-                                ? "text-red-600"
-                                : i.level === "warn"
-                                  ? "text-amber-600"
-                                  : "text-muted-foreground",
-                            )}
-                          >
-                            <span className="font-mono">{i.data}</span>
-                            <span>{i.message}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  );
-                })}
+        <Dialog open={colaboradorDialogOpen} onOpenChange={setColaboradorDialogOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>
+                {colaboradorDraft?.id ? "Colaborador" : "Novo colaborador"}
+              </DialogTitle>
+              <DialogDescription>
+                Cadastre ou edite as informações do colaborador para a jornada contínua.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-4 py-2">
+              <div>
+                <ColaboradorSelect
+                  value={selectedBaseId}
+                  onChange={selectBaseColaborador}
+                  colaboradores={baseColaboradores.map((base) => ({
+                    id: base.id,
+                    nome: base.nome,
+                    matricula: base.matricula,
+                    area: base.setor,
+                  }))}
+                  label="Base de colaboradores"
+                />
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <div>
+                <Label htmlFor="nome">Nome</Label>
+                <Input
+                  id="nome"
+                  value={colaboradorDraft?.nome ?? ""}
+                  onChange={(event) =>
+                    setColaboradorDraft((current) =>
+                      current ? { ...current, nome: event.target.value } : current,
+                    )
+                  }
+                />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="matricula">Matrícula</Label>
+                  <Input
+                    id="matricula"
+                    value={colaboradorDraft?.matricula ?? ""}
+                    onChange={(event) =>
+                      setColaboradorDraft((current) =>
+                        current ? { ...current, matricula: event.target.value } : current,
+                      )
+                    }
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="admissao">Admissão</Label>
+                  <Input
+                    id="admissao"
+                    type="date"
+                    value={colaboradorDraft?.admissao ?? hojeISO}
+                    onChange={(event) =>
+                      setColaboradorDraft((current) =>
+                        current ? { ...current, admissao: event.target.value } : current,
+                      )
+                    }
+                  />
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <Label htmlFor="cargo">Cargo</Label>
+                  <Input
+                    id="cargo"
+                    value={colaboradorDraft?.cargo ?? ""}
+                    onChange={(event) =>
+                      setColaboradorDraft((current) =>
+                        current ? { ...current, cargo: event.target.value } : current,
+                      )
+                    }
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="setor">Setor</Label>
+                  <Input
+                    id="setor"
+                    value={colaboradorDraft?.setor ?? ""}
+                    onChange={(event) =>
+                      setColaboradorDraft((current) =>
+                        current ? { ...current, setor: event.target.value } : current,
+                      )
+                    }
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="turno">Turno</Label>
+                  <Select
+                    value={colaboradorDraft?.turno ?? "Manhã"}
+                    onValueChange={(value) =>
+                      setColaboradorDraft((current) =>
+                        current ? { ...current, turno: value as any } : current,
+                      )
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Manhã">Manhã</SelectItem>
+                      <SelectItem value="Tarde">Tarde</SelectItem>
+                      <SelectItem value="Noite">Noite</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="supervisor">Supervisor</Label>
+                <Input
+                  id="supervisor"
+                  value={colaboradorDraft?.supervisor ?? ""}
+                  onChange={(event) =>
+                    setColaboradorDraft((current) =>
+                      current ? { ...current, supervisor: event.target.value } : current,
+                    )
+                  }
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="aceitaDomingo"
+                  checked={colaboradorDraft?.aceitaDomingo ?? false}
+                  onCheckedChange={(checked) =>
+                    setColaboradorDraft((current) =>
+                      current ? { ...current, aceitaDomingo: Boolean(checked) } : current,
+                    )
+                  }
+                />
+                <Label htmlFor="aceitaDomingo" className="cursor-pointer">
+                  Aceita domingo trabalhado e recebe folga compensatória
+                </Label>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="secondary">Cancelar</Button>
+              </DialogClose>
+              <Button onClick={handleSaveColaborador}>Salvar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </TooltipProvider>
   );
 }
+
 
 function Kpi({
   label,
@@ -648,12 +1024,11 @@ function Kpi({
     amber: "text-amber-600",
     red: "text-red-600",
   }[tone];
+
   return (
     <Card>
       <CardContent className="p-4">
-        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          {label}
-        </div>
+        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
         <div className={cn("mt-1 text-2xl font-bold", toneCls)}>{value}</div>
       </CardContent>
     </Card>
@@ -662,7 +1037,7 @@ function Kpi({
 
 function Legend({ cls, label }: { cls: string; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-1.5 text-xs">
       <span className={cn("h-3 w-3 rounded border", cls)} />
       {label}
     </span>
@@ -674,302 +1049,16 @@ function StatusBadge({
 }: {
   nivel: "ok" | "amarelo" | "vermelho" | "critico";
 }) {
-  if (nivel === "critico")
-    return <Badge variant="destructive">Crítico</Badge>;
+  if (nivel === "critico") return <Badge variant="destructive">Crítico</Badge>;
   if (nivel === "vermelho")
     return (
-      <Badge className="bg-red-500/15 text-red-700 hover:bg-red-500/25">
-        6 dias
-      </Badge>
+      <Badge className="bg-red-500/15 text-red-700 hover:bg-red-500/25">6 dias</Badge>
     );
   if (nivel === "amarelo")
     return (
-      <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/25">
-        5 dias
-      </Badge>
+      <Badge className="bg-amber-500/15 text-amber-700 hover:bg-amber-500/25">5 dias</Badge>
     );
   return (
-    <Badge className="bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25">
-      OK
-    </Badge>
+    <Badge className="bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25">OK</Badge>
   );
 }
-
-function NovoColaboradorDialog({
-  open,
-  setOpen,
-  onCreate,
-  colaboradores,
-}: {
-  open: boolean;
-  setOpen: (o: boolean) => void;
-  onCreate: (c: EscalaColaborador) => void;
-  colaboradores: EscalaColaborador[];
-}) {
-  const [base, setBase] = useState<ColaboradorBase[]>([]);
-  const [loadingBase, setLoadingBase] = useState(false);
-  const [selectedBaseId, setSelectedBaseId] = useState<string>("");
-  const [baseOpen, setBaseOpen] = useState(false);
-  const selectedBase = base.find((b) => b.id === selectedBaseId) ?? null;
-  const [form, setForm] = useState<Omit<EscalaColaborador, "id" | "matricula" | "escala">>({
-    nome: "",
-    cargo: "",
-    setor: "",
-    supervisor: "",
-    admissao: toISODate(new Date()),
-    aceitaDomingo: false,
-  });
-
-  useEffect(() => {
-    if (!open) return;
-    setLoadingBase(true);
-    fetchColaboradoresBase()
-      .then(setBase)
-      .finally(() => setLoadingBase(false));
-  }, [open]);
-
-  const jaCadastrados = useMemo(
-    () => new Set(colaboradores.map((c) => c.matricula)),
-    [colaboradores],
-  );
-
-  function handleSelectBase(id: string) {
-    setSelectedBaseId(id);
-    const b = base.find((x) => x.id === id);
-    if (!b) return;
-    setForm((f) => ({
-      ...f,
-      nome: b.nome,
-      cargo: b.cargo || f.cargo,
-      setor: b.setor || f.setor,
-      supervisor: b.supervisor || f.supervisor,
-    }));
-  }
-
-  function submit() {
-    if (!form.nome || !form.cargo || !form.setor) {
-      toast.error("Selecione um colaborador e preencha cargo e setor.");
-      return;
-    }
-    const b = base.find((x) => x.id === selectedBaseId);
-    onCreate({
-      ...form,
-      id: b?.id ?? novoColaboradorId(),
-      matricula: b?.matricula ?? novaMatricula(colaboradores),
-      escala: "6x1",
-    });
-    toast.success("Colaborador cadastrado.");
-    setOpen(false);
-    setSelectedBaseId("");
-    setForm({
-      nome: "",
-      cargo: "",
-      setor: "",
-      supervisor: "",
-      admissao: toISODate(new Date()),
-      aceitaDomingo: false,
-    });
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <Button size="sm" onClick={() => setOpen(true)}>
-        <Plus className="mr-2 h-4 w-4" />
-        Novo colaborador
-      </Button>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Cadastrar colaborador (6x1)</DialogTitle>
-          <DialogDescription>
-            Selecione um colaborador da base. Cargo, setor e supervisor são
-            preenchidos automaticamente e podem ser ajustados.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Colaborador (base)" full>
-            <Popover open={baseOpen} onOpenChange={setBaseOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={baseOpen}
-                  className="w-full justify-between font-normal"
-                >
-                  {selectedBase ? (
-                    <span className="truncate">
-                      {selectedBase.nome}{" "}
-                      <span className="text-muted-foreground">
-                        · {selectedBase.matricula}
-                      </span>
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      {loadingBase ? "Carregando..." : "Buscar colaborador..."}
-                    </span>
-                  )}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                className="w-[--radix-popover-trigger-width] p-0"
-                align="start"
-              >
-                <Command
-                  filter={(itemValue, search) =>
-                    itemValue.toLowerCase().includes(search.toLowerCase()) ? 1 : 0
-                  }
-                >
-                  <CommandInput placeholder="Buscar por nome ou matrícula..." />
-                  <CommandList>
-                    <CommandEmpty>
-                      {loadingBase
-                        ? "Carregando..."
-                        : "Nenhum colaborador encontrado."}
-                    </CommandEmpty>
-                    <CommandGroup>
-                      {base.map((b) => {
-                        const ja = jaCadastrados.has(b.matricula);
-                        return (
-                          <CommandItem
-                            key={b.id}
-                            value={`${b.nome} ${b.matricula} ${b.cargo} ${b.setor}`}
-                            disabled={ja}
-                            onSelect={() => {
-                              if (ja) return;
-                              handleSelectBase(b.id);
-                              setBaseOpen(false);
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                selectedBaseId === b.id
-                                  ? "opacity-100"
-                                  : "opacity-0",
-                              )}
-                            />
-                            <div className="flex flex-col">
-                              <span className="font-medium">
-                                {b.nome}
-                                {ja ? " (já cadastrado)" : ""}
-                              </span>
-                              <span className="text-xs text-muted-foreground">
-                                {b.matricula}
-                                {b.cargo ? ` · ${b.cargo}` : ""}
-                                {b.setor ? ` · ${b.setor}` : ""}
-                              </span>
-                            </div>
-                          </CommandItem>
-                        );
-                      })}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </Field>
-          <Field label="Cargo">
-            <Select
-              value={form.cargo}
-              onValueChange={(v) => setForm({ ...form, cargo: v })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione o cargo" />
-              </SelectTrigger>
-              <SelectContent>
-                {CARGOS.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Setor / Área">
-            <Select
-              value={form.setor}
-              onValueChange={(v) => setForm({ ...form, setor: v })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione a área" />
-              </SelectTrigger>
-              <SelectContent>
-                {AREAS.map((a) => (
-                  <SelectItem key={a} value={a}>
-                    {a}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Supervisor">
-            <Select
-              value={form.supervisor}
-              onValueChange={(v) => setForm({ ...form, supervisor: v })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione o gestor" />
-              </SelectTrigger>
-              <SelectContent>
-                {GESTORES.map((g) => (
-                  <SelectItem key={g} value={g}>
-                    {g}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field label="Admissão">
-            <Input
-              type="date"
-              value={form.admissao}
-              onChange={(e) => setForm({ ...form, admissao: e.target.value })}
-            />
-          </Field>
-          <div className="sm:col-span-2 flex items-start justify-between gap-3 rounded-md border bg-muted/30 p-3">
-            <div>
-              <Label className="text-sm">Aceita horas extras aos domingos</Label>
-              <p className="text-[11px] text-muted-foreground">
-                Quando ativo, o colaborador pode ser escalado aos domingos e
-                ganha automaticamente direito a 1 folga compensatória em até
-                7 dias (CLT art. 67).
-              </p>
-            </div>
-            <Switch
-              checked={form.aceitaDomingo}
-              onCheckedChange={(v) => setForm({ ...form, aceitaDomingo: v })}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => setOpen(false)}>
-            Cancelar
-          </Button>
-          <Button onClick={submit}>Cadastrar</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function Field({
-  label,
-  children,
-  full,
-}: {
-  label: string;
-  children: React.ReactNode;
-  full?: boolean;
-}) {
-  return (
-    <div className={cn("grid gap-1.5", full && "sm:col-span-2")}>
-      <Label className="text-xs">{label}</Label>
-      {children}
-    </div>
-  );
-}
-
-// Suprime warning de variável não usada
-void addDays;
