@@ -71,17 +71,26 @@ function isFallbackEmail(email?: string | null) {
   return normalizeEmail(email).endsWith(FALLBACK_DOMAIN);
 }
 
+type Atribuicao = {
+  id: string;
+  setor: string;
+  cargo: string;
+  turno: Turno;
+};
+
 type Row = {
   id?: string;
   nome: string;
   email: string;
-  setor?: string | null;
-  turno?: string | null;
+  setor?: string | null; // Mantido para compatibilidade, agora deprecated
+  turno?: string | null; // Mantido para compatibilidade, agora deprecated
   colaboradoresCount: number;
+  atribuicoes?: Atribuicao[]; // Novo: múltiplas atribuições
   isNew?: boolean;
   isEditing?: boolean;
   draftNome?: string;
   draftEmail?: string;
+  isManagingAtribuicoes?: boolean; // Novo: se está editando atribuições
 };
 
 export function GestoresModal({
@@ -109,17 +118,59 @@ export function GestoresModal({
   const [previewCount, setPreviewCount] = useState<number | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<Row | null>(null);
+  
+  // Novo: gerenciar atribuições
+  const [managingGestorId, setManagingGestorId] = useState<string | null>(null);
+  const [novaAtribuicaoSetor, setNovaAtribuicaoSetor] = useState<string>("");
+  const [novaAtribuicaoCargo, setNovaAtribuicaoCargo] = useState<string>("");
+  const [novaAtribuicaoTurno, setNovaAtribuicaoTurno] = useState<Turno | "">("");
+  
   const runTest = useServerFn(testSmtp);
 
   async function refreshRows() {
+    // Carrega gestores básicos
     const { data: all, error } = await supabase
       .from("gestores")
-      .select("id, nome, email, setor, turno")
+      .select("id, nome, email")
       .order("nome", { ascending: true });
     if (error) {
       toast.error(`Erro ao carregar gestores: ${error.message}`);
       return;
     }
+    
+    // Carrega atribuições (novo modelo)
+    let atribuicoes: any[] = [];
+    const { data: attr, error: attrError } = await supabase
+      .from("gestor_atribuicoes")
+      .select("*")
+      .order("setor, cargo, turno");
+    
+    if (attrError) {
+      // Verifica se é erro de tabela não encontrada
+      if (attrError.message.includes("does not exist") || 
+          attrError.message.includes("relation") ||
+          attrError.message.includes("schema cache")) {
+        console.warn("[v0] Tabela gestor_atribuicoes não existe ainda. Execute o script SQL no Supabase.");
+        toast.warning(
+          "⚠️ Tabela gestor_atribuicoes não foi criada. Veja o arquivo COMO_EXECUTAR_NO_SUPABASE.md"
+        );
+      } else {
+        console.error("[v0] Erro ao carregar atribuições:", attrError);
+      }
+    } else {
+      atribuicoes = attr ?? [];
+    }
+    
+    // Monta mapa de atribuições por gestor
+    const atribuicoesPorGestor = new Map<string, any[]>();
+    for (const a of atribuicoes) {
+      if (!atribuicoesPorGestor.has(a.gestor_id)) {
+        atribuicoesPorGestor.set(a.gestor_id, []);
+      }
+      atribuicoesPorGestor.get(a.gestor_id)!.push(a);
+    }
+    
+    // Carrega contagem de colaboradores vinculados
     const { data: counts } = await supabase
       .from("colaboradores")
       .select("gestor_id");
@@ -128,14 +179,16 @@ export function GestoresModal({
       if (!c.gestor_id) continue;
       countMap.set(c.gestor_id, (countMap.get(c.gestor_id) ?? 0) + 1);
     }
+    
     setRows(
       (all ?? []).map((g) => ({
         id: g.id,
         nome: g.nome,
         email: isFallbackEmail(g.email) ? "" : g.email ?? "",
-        setor: (g as { setor?: string | null }).setor ?? null,
-        turno: (g as { turno?: string | null }).turno ?? null,
+        setor: null, // Removido do gestor, agora em atribuições
+        turno: null, // Removido do gestor, agora em atribuições
         colaboradoresCount: countMap.get(g.id) ?? 0,
+        atribuicoes: atribuicoesPorGestor.get(g.id) ?? [],
       })),
     );
   }
@@ -298,54 +351,50 @@ export function GestoresModal({
   async function adicionar() {
     const nome = novoNome.trim();
     const emailRaw = novoEmail.trim();
-    const setor = novoSetor.trim();
-    const cargo = novoCargo.trim();
-    const turno = novoTurno;
     if (!nome) return toast.error("Informe o nome do gestor");
-    if (!setor) return toast.error("Selecione um setor para vincular colaboradores");
-    if (!cargo) return toast.error("Selecione um cargo para vincular colaboradores");
-    if (!turno) return toast.error("Selecione um turno para vincular colaboradores");
     if (emailRaw && !EMAIL_REGEX.test(emailRaw)) return toast.error("E-mail inválido");
 
     const email = emailRaw ? normalizeEmail(emailRaw) : buildFallbackEmail(nome);
 
-    if (
-      rows.some(
-        (r) =>
-          normalizeNome(r.nome) === normalizeNome(nome) &&
-          (r.setor ?? "") === setor &&
-          (r.turno ?? "") === turno,
-      )
-    ) {
-      return toast.error(
-        `Já existe o gestor "${nome}" para ${setor} · ${turno}`,
-      );
+    // Verifica se já existe um gestor com este nome ou email
+    if (rows.some((r) => normalizeNome(r.nome) === normalizeNome(nome))) {
+      return toast.error(`Já existe um gestor com o nome "${nome}"`);
     }
-    if (
-      rows.some(
-        (r) =>
-          r.email &&
-          normalizeEmail(r.email) === email &&
-          (r.setor ?? "") === setor &&
-          (r.turno ?? "") === turno,
-      )
-    ) {
-      return toast.error(
-        `O e-mail ${email} já está em uso para ${setor} · ${turno}`,
-      );
+    if (rows.some((r) => r.email && normalizeEmail(r.email) === email)) {
+      return toast.error(`O e-mail ${email} já pertence a outro gestor`);
     }
 
     setSavingId("__new__");
     try {
+      // Cria o gestor sem setor/turno/cargo (agora são atribuições)
       const { data: inserted, error } = await supabase
         .from("gestores")
-        .insert({ nome, email, setor, turno } as never)
+        .insert({ nome, email })
         .select("id")
         .single();
       if (error) throw error;
 
+      // Se forneceu setor/cargo/turno, cria a atribuição
       let vinculados = 0;
-      if (inserted?.id) {
+      if (inserted?.id && novoSetor && novoCargo && novoTurno) {
+        const setor = novoSetor.trim();
+        const cargo = novoCargo.trim();
+        const turno = novoTurno;
+
+      // Cria atribuição
+      const { error: attrErr } = await supabase
+        .from("gestor_atribuicoes")
+        .insert({ gestor_id: inserted.id, setor, cargo, turno });
+      if (attrErr) {
+        if (attrErr.message.includes("does not exist") || attrErr.message.includes("schema cache")) {
+          throw new Error(
+            "Tabela gestor_atribuicoes não existe. Execute o script SQL no Supabase (arquivo EXECUTE_NO_SUPABASE.sql)"
+          );
+        }
+        throw attrErr;
+      }
+
+        // Busca e vincula colaboradores com essa combinação
         const { data: alvos, error: selErr } = await supabase
           .from("colaboradores")
           .select("id")
@@ -363,18 +412,14 @@ export function GestoresModal({
           if (linkErr) throw linkErr;
           vinculados = ids.length;
         }
-      }
 
-      if (vinculados > 0) {
         toast.success(
           `Gestor ${nome} adicionado e vinculado a ${vinculados} colaborador${
             vinculados === 1 ? "" : "es"
           } (${setor} · ${cargo} · ${turno})`,
         );
       } else {
-        toast.success(
-          `Gestor ${nome} adicionado. Nenhum colaborador encontrado para ${setor} · ${cargo} · ${turno}`,
-        );
+        toast.success(`Gestor ${nome} adicionado. Adicione atribuições depois.`);
       }
 
       setNovoNome("");
@@ -385,6 +430,95 @@ export function GestoresModal({
       setAdding(false);
       onChanged();
       if (vinculados > 0) onColaboradoresChanged?.();
+      await refreshRows();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function adicionarAtribuicao(gestorId: string) {
+    if (!novaAtribuicaoSetor || !novaAtribuicaoCargo || !novaAtribuicaoTurno) {
+      return toast.error("Selecione setor, cargo e turno");
+    }
+
+    setSavingId(gestorId);
+    try {
+      const setor = novaAtribuicaoSetor;
+      const cargo = novaAtribuicaoCargo;
+      const turno = novaAtribuicaoTurno;
+
+      // Verifica se já existe
+      const gestor = rows.find((r) => r.id === gestorId);
+      if (
+        gestor?.atribuicoes?.some(
+          (a) => a.setor === setor && a.cargo === cargo && a.turno === turno,
+        )
+      ) {
+        return toast.error(
+          `Já existe atribuição para ${setor} · ${cargo} · ${turno}`,
+        );
+      }
+
+      // Cria atribuição
+      const { error: attrErr } = await supabase
+        .from("gestor_atribuicoes")
+        .insert({ gestor_id: gestorId, setor, cargo, turno });
+      if (attrErr) {
+        if (attrErr.message.includes("does not exist") || attrErr.message.includes("schema cache")) {
+          throw new Error(
+            "Tabela gestor_atribuicoes não existe. Execute o script SQL no Supabase (arquivo EXECUTE_NO_SUPABASE.sql)"
+          );
+        }
+        throw attrErr;
+      }
+
+      // Busca e vincula colaboradores
+      const { data: alvos } = await supabase
+        .from("colaboradores")
+        .select("id")
+        .eq("area", setor)
+        .eq("cargo", cargo)
+        .eq("turno", turno)
+        .is("gestor_id", null); // Apenas não vinculados
+
+      if (alvos && alvos.length > 0) {
+        const ids = alvos.map((a) => a.id);
+        await supabase
+          .from("colaboradores")
+          .update({ gestor_id: gestorId })
+          .in("id", ids);
+        onColaboradoresChanged?.();
+      }
+
+      toast.success(
+        `Atribuição adicionada para ${setor} · ${cargo} · ${turno}`,
+      );
+      setNovaAtribuicaoSetor("");
+      setNovaAtribuicaoCargo("");
+      setNovaAtribuicaoTurno("");
+      setManagingGestorId(null);
+      onChanged();
+      await refreshRows();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function removerAtribuicao(gestorId: string, atribuicaoId: string) {
+    setSavingId(gestorId);
+    try {
+      const { error } = await supabase
+        .from("gestor_atribuicoes")
+        .delete()
+        .eq("id", atribuicaoId);
+      if (error) throw error;
+
+      toast.success("Atribuição removida");
+      onChanged();
       await refreshRows();
     } catch (e) {
       toast.error((e as Error).message);
@@ -432,8 +566,9 @@ export function GestoresModal({
               Cadastro de gestores
             </DialogTitle>
             <DialogDescription>
-              Gerencie gestores, e-mails e vínculos. Cada gestor recebe relatórios
-              automáticos apenas dos colaboradores ligados a ele.
+              Gerencie gestores, e-mails e múltiplas atribuições. Um gestor pode gerenciar
+              vários processos (setor/cargo/turno) simultaneamente. Cada gestor recebe
+              relatórios automáticos apenas dos colaboradores ligados a ele.
             </DialogDescription>
           </DialogHeader>
 
@@ -494,13 +629,14 @@ export function GestoresModal({
           {adding && (
             <div className="rounded-md border border-dashed bg-muted/20 p-3">
               <p className="mb-2 text-xs text-muted-foreground">
-                Ao salvar, todos os colaboradores com o setor, cargo e turno
-                selecionados serão automaticamente vinculados a este gestor.
+                Informe o nome do gestor (obrigatório). Opcionalmente, selecione setor,
+                cargo e turno para vinculá-lo automaticamente. Você poderá adicionar mais
+                atribuições depois clicando em "Atribuições".
               </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div>
-                  <Label htmlFor="novo-nome" className="text-xs">
-                    Nome <span className="text-destructive">*</span>
+                  <Label htmlFor="novo-setor" className="text-xs">
+                    Setor / Área <span className="text-muted-foreground">(opcional)</span>
                   </Label>
                   <Input
                     id="novo-nome"
@@ -545,7 +681,7 @@ export function GestoresModal({
                 </div>
                 <div>
                   <Label htmlFor="novo-cargo" className="text-xs">
-                    Cargo <span className="text-destructive">*</span>
+                    Cargo <span className="text-muted-foreground">(opcional)</span>
                   </Label>
                   <Select value={novoCargo} onValueChange={setNovoCargo}>
                     <SelectTrigger id="novo-cargo">
@@ -567,7 +703,7 @@ export function GestoresModal({
                 </div>
                 <div>
                   <Label htmlFor="novo-turno" className="text-xs">
-                    Turno <span className="text-destructive">*</span>
+                    Turno <span className="text-muted-foreground">(opcional)</span>
                   </Label>
                   <Select
                     value={novoTurno}
@@ -590,8 +726,9 @@ export function GestoresModal({
                 <div className="text-xs">
                   {!novoSetor || !novoCargo || !novoTurno ? (
                     <span className="text-muted-foreground">
-                      Selecione setor, cargo e turno para ver quantos
-                      colaboradores serão vinculados.
+                      (opcional) Selecione setor, cargo e turno para vincular colaboradores
+                      automaticamente ao criar o gestor. Você poderá adicionar mais atribuições
+                      depois.
                     </span>
                   ) : previewBusy ? (
                     <span className="inline-flex items-center gap-1 text-muted-foreground">
@@ -617,20 +754,18 @@ export function GestoresModal({
                 <Button
                   size="sm"
                   onClick={adicionar}
-                  disabled={
-                    savingId === "__new__" ||
-                    !novoNome.trim() ||
-                    !novoSetor ||
-                    !novoCargo ||
-                    !novoTurno
-                  }
+                  disabled={savingId === "__new__" || !novoNome.trim()}
                 >
                   {savingId === "__new__" ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Save className="h-4 w-4" />
                   )}
-                  <span className="ml-1">Adicionar e vincular</span>
+                  <span className="ml-1">
+                    {novoSetor && novoCargo && novoTurno
+                      ? "Adicionar e vincular"
+                      : "Adicionar gestor"}
+                  </span>
                 </Button>
               </div>
             </div>
@@ -688,11 +823,19 @@ export function GestoresModal({
                             {r.colaboradoresCount} colaborador
                             {r.colaboradoresCount === 1 ? "" : "es"}
                           </Badge>
-                          {(r.setor || r.turno) && (
-                            <Badge variant="secondary" className="gap-1">
-                              {r.setor ?? "—"}
-                              {r.turno ? ` · ${r.turno}` : ""}
-                            </Badge>
+                          {r.atribuicoes && r.atribuicoes.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {r.atribuicoes.slice(0, 2).map((a) => (
+                                <Badge key={a.id} variant="secondary" className="gap-1 text-xs">
+                                  {a.setor} · {a.turno}
+                                </Badge>
+                              ))}
+                              {r.atribuicoes.length > 2 && (
+                                <Badge variant="secondary" className="text-xs">
+                                  +{r.atribuicoes.length - 2}
+                                </Badge>
+                              )}
+                            </div>
                           )}
                         </div>
                       )}
@@ -756,6 +899,19 @@ export function GestoresModal({
                           </Button>
                           <Button
                             size="sm"
+                            variant={managingGestorId === r.id ? "default" : "outline"}
+                            onClick={() =>
+                              setManagingGestorId(
+                                managingGestorId === r.id ? null : r.id ?? null,
+                              )
+                            }
+                            title="Gerenciar atribuições"
+                          >
+                            <UserCog className="h-4 w-4" />
+                            <span className="ml-1 hidden sm:inline">Atribuições</span>
+                          </Button>
+                          <Button
+                            size="sm"
                             variant="outline"
                             onClick={() => startEdit(r)}
                             title="Editar gestor"
@@ -777,6 +933,104 @@ export function GestoresModal({
                       )}
                     </div>
                   </div>
+
+                  {managingGestorId === r.id && (
+                    <div className="mt-3 rounded-md border border-dashed bg-muted/30 p-3">
+                      <div className="mb-3">
+                        <p className="mb-2 text-xs font-medium text-muted-foreground">
+                          Atribuições: {r.atribuicoes?.length ?? 0} processo{" "}
+                          {(r.atribuicoes?.length ?? 0) === 1 ? "" : "s"}
+                        </p>
+                        <div className="space-y-2">
+                          {r.atribuicoes?.map((a) => (
+                            <div
+                              key={a.id}
+                              className="flex items-center justify-between rounded-sm bg-background p-2 text-sm"
+                            >
+                              <span>
+                                <strong>{a.setor}</strong> · {a.cargo} ·{" "}
+                                <strong>{a.turno}</strong>
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => removerAtribuicao(r.id!, a.id)}
+                                disabled={savingId === r.id}
+                                className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10"
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <Separator className="my-2" />
+
+                      <p className="mb-2 text-xs font-medium text-muted-foreground">
+                        Adicionar nova atribuição
+                      </p>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        <Select value={novaAtribuicaoSetor} onValueChange={setNovaAtribuicaoSetor}>
+                          <SelectTrigger size="sm" className="h-8 text-xs">
+                            <SelectValue placeholder="Setor" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {setoresDisponiveis.map((s) => (
+                              <SelectItem key={s} value={s}>
+                                {s}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select value={novaAtribuicaoCargo} onValueChange={setNovaAtribuicaoCargo}>
+                          <SelectTrigger size="sm" className="h-8 text-xs">
+                            <SelectValue placeholder="Cargo" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {cargosDisponiveis.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={novaAtribuicaoTurno}
+                          onValueChange={(v) => setNovaAtribuicaoTurno(v as Turno)}
+                        >
+                          <SelectTrigger size="sm" className="h-8 text-xs">
+                            <SelectValue placeholder="Turno" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {TURNOS.map((t) => (
+                              <SelectItem key={t} value={t}>
+                                {t}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => adicionarAtribuicao(r.id!)}
+                        disabled={
+                          savingId === r.id ||
+                          !novaAtribuicaoSetor ||
+                          !novaAtribuicaoCargo ||
+                          !novaAtribuicaoTurno
+                        }
+                        className="mt-2 w-full"
+                      >
+                        {savingId === r.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Plus className="h-4 w-4" />
+                        )}
+                        <span className="ml-1">Adicionar atribuição</span>
+                      </Button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -805,7 +1059,7 @@ export function GestoresModal({
               ?
               {confirmRemove && confirmRemove.colaboradoresCount > 0 && (
                 <span className="mt-2 block text-destructive">
-                  Atenção: {confirmRemove.colaboradoresCount} colaborador(es) está(ão)
+                  Atenção: {confirmRemove.colaboradoresCount} colaborador(es) está(��o)
                   vinculado(s) a este gestor. Eles ficarão sem gestor após a remoção.
                 </span>
               )}

@@ -212,6 +212,41 @@ export type Database = {
           },
         ]
       }
+      gestor_atribuicoes: {
+        Row: {
+          cargo: string
+          created_at: string
+          gestor_id: string
+          id: string
+          setor: string
+          turno: Database["public"]["Enums"]["turno_enum"]
+        }
+        Insert: {
+          cargo: string
+          created_at?: string
+          gestor_id: string
+          id?: string
+          setor: string
+          turno: Database["public"]["Enums"]["turno_enum"]
+        }
+        Update: {
+          cargo?: string
+          created_at?: string
+          gestor_id?: string
+          id?: string
+          setor?: string
+          turno?: Database["public"]["Enums"]["turno_enum"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gestor_atribuicoes_gestor_id_fkey"
+            columns: ["gestor_id"]
+            isOneToOne: false
+            referencedRelation: "gestores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       gestores: {
         Row: {
           created_at: string

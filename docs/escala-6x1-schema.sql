@@ -1,4 +1,4 @@
--- Modulo 6x1: rode este script no SQL Editor do Supabase do projeto vbvuscqhkzdussieweey.
+-- Modulo 6x1: rode este script no SQL Editor do Supabase do projeto rpyejdtxsuodagbvakhw.
 -- Enquanto as tabelas nao existirem, o app continua via cache local (seed).
 
 create table if not exists public.escala_colaboradores (
