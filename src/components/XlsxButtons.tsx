@@ -11,6 +11,8 @@ import { supabase } from "@/integrations/custom-supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { enviarFaltasParaGestores } from "@/lib/email-faltas.functions";
 import { formatDateBr } from "@/lib/date";
+import { validarFeriasExistente } from "@/lib/ferias.functions";
+import { AlertTriangle } from "lucide-react";
 
 type Colab = { id: string; nome: string; gpid: string; area: string; turno: string; gestor_id?: string | null };
 type Falta = { id: string; colaborador_id: string; data: string; motivo: string; periodo: string };
@@ -24,6 +26,31 @@ type FaltaImportRow = {
     periodo: string;
     observacao: string;
   };
+};
+
+type FeriasImportRow = {
+  line: number;
+  colaborador: Colab;
+  periodo_aquisitivo: string;
+  inicio: string;
+  fim: string;
+};
+
+type FeriasConflito = {
+  linha: number;
+  colaborador: Colab;
+  periodo_aquisitivo: string;
+  inicio: string;
+  fim: string;
+  feriasExistentes: Array<{ inicio: string; fim: string; status: string }>;
+};
+
+type FeriasDuplicataArquivo = {
+  colaborador: Colab;
+  periodo_aquisitivo: string;
+  ano: number;
+  linhas: number[];
+  ferias: Array<{ linha: number; inicio: string; fim: string }>;
 };
 
 function chunk<T>(items: T[], size: number) {
@@ -341,12 +368,97 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
   const [busy, setBusy] = useState(false);
   const [errorRows, setErrorRows] = useState<string[]>([]);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
+  const [conflitos, setConflitos] = useState<FeriasConflito[]>([]);
+  const [showConflitoDialog, setShowConflitoDialog] = useState(false);
+  const [linhasParaPular, setLinhasParaPular] = useState<Set<number>>(new Set());
+  const [feriasParaImportar, setFeriasParaImportar] = useState<FeriasImportRow[]>([]);
+  const [duplicatasArquivo, setDuplicatasArquivo] = useState<FeriasDuplicataArquivo[]>([]);
+  const [showDuplicatasDialog, setShowDuplicatasDialog] = useState(false);
+  const validarFerias = useServerFn(validarFeriasExistente);
+
+  function detectarDuplicatasArquivo(ferias: FeriasImportRow[]): FeriasDuplicataArquivo[] {
+    // Agrupa por colaborador + periodo + ano
+    const grupos = new Map<string, FeriasDuplicataArquivo>();
+
+    for (const feria of ferias) {
+      const ano = new Date(feria.inicio).getFullYear();
+      const chave = `${feria.colaborador.id}|${feria.periodo_aquisitivo}|${ano}`;
+
+      if (!grupos.has(chave)) {
+        grupos.set(chave, {
+          colaborador: feria.colaborador,
+          periodo_aquisitivo: feria.periodo_aquisitivo,
+          ano,
+          linhas: [],
+          ferias: [],
+        });
+      }
+
+      const grupo = grupos.get(chave)!;
+      grupo.linhas.push(feria.line);
+      grupo.ferias.push({
+        linha: feria.line,
+        inicio: feria.inicio,
+        fim: feria.fim,
+      });
+    }
+
+    // Retorna apenas grupos com duplicatas (mais de 1 féria)
+    return Array.from(grupos.values()).filter((g) => g.ferias.length > 1);
+  }
+
+  async function importarFeriasValidadas() {
+    setBusy(true);
+    try {
+      const aImportar = feriasParaImportar.filter((f) => !linhasParaPular.has(f.line));
+      if (aImportar.length === 0) {
+        toast.info("Nenhuma féria selecionada para importação");
+        setShowConflitoDialog(false);
+        return;
+      }
+
+      const inserts = aImportar.map((f) => ({
+        colaborador_id: f.colaborador.id,
+        gestor_id: f.colaborador.gestor_id ?? null,
+        inicio: f.inicio,
+        fim: f.fim,
+        periodo_aquisitivo: f.periodo_aquisitivo,
+        status: "Pendente",
+      }));
+
+      let ok = 0;
+      const erros: string[] = [];
+      for (const batch of chunk(inserts, 200)) {
+        const { error } = await supabase.from("ferias").insert(batch);
+        if (error) {
+          erros.push(`Lote: ${error.message}`);
+        } else {
+          ok += batch.length;
+        }
+      }
+
+      toast.success(`${ok} férias importadas. ${erros.length} erros.`);
+      if (erros.length) {
+        setErrorRows(erros);
+        setShowErrorDialog(true);
+      }
+      setShowConflitoDialog(false);
+      onDone();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handle(file: File) {
     setBusy(true);
     try {
       const rows = await readXlsxRows(file);
-      const inserts: any[] = []; const erros: string[] = [];
+      const inserts: FeriasImportRow[] = [];
+      const erros: string[] = [];
+      const conflitosEncontrados: FeriasConflito[] = [];
+
       for (const [i, r] of rows.entries()) {
         const inicio = toISODate(r.inicio ?? r.Início ?? r.Inicio ?? r["Data início"] ?? r["Data inicio"]);
         const fim = toISODate(r.fim ?? r.Fim ?? r["Data fim"]);
@@ -366,59 +478,236 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
           ?? r.Gpid
           ?? "",
         ).trim();
-        if (!inicio || !fim || !pa) { erros.push(`Linha ${i + 2}: campos obrigatórios faltando (colaborador: "${ref || "não informado"}")`); continue; }
-        const c = findColaborador(colabs, ref);
-        if (!c) { erros.push(`Linha ${i + 2}: colaborador "${ref}" não encontrado`); continue; }
-        inserts.push({
-          colaborador_id: c.id, gestor_id: c.gestor_id ?? null,
-          inicio, fim, periodo_aquisitivo: pa, status: "Pendente",
-        });
-      }
-      const dedup = Array.from(new Map(inserts.map((r) => [`${r.colaborador_id}|${r.inicio}|${r.fim}|${r.periodo_aquisitivo}`, r])).values());
-      const colabIds = Array.from(new Set(dedup.map((r) => r.colaborador_id)));
-      const { data: existentes, error: readError } = colabIds.length
-        ? await supabase
-          .from("ferias")
-          .select("id, colaborador_id, inicio, fim, periodo_aquisitivo")
-          .in("colaborador_id", colabIds)
-        : { data: [], error: null };
-      if (readError) throw readError;
 
-      const existingMap = new Map((existentes ?? []).map((f) => [`${f.colaborador_id}|${f.inicio}|${f.fim}|${f.periodo_aquisitivo}`, f.id]));
-      let ok = 0;
-      for (const batch of chunk(dedup, 200)) {
-        const novos = batch.filter((r) => !existingMap.has(`${r.colaborador_id}|${r.inicio}|${r.fim}|${r.periodo_aquisitivo}`));
-        const atualizaveis = batch.filter((r) => existingMap.has(`${r.colaborador_id}|${r.inicio}|${r.fim}|${r.periodo_aquisitivo}`));
-        if (novos.length) {
-          const { error } = await supabase.from("ferias").insert(novos);
-          if (error) erros.push(error.message); else ok += novos.length;
+        if (!inicio || !fim || !pa) {
+          erros.push(`Linha ${i + 2}: campos obrigatórios faltando (colaborador: "${ref || "não informado"}")`);
+          continue;
         }
-        for (const r of atualizaveis) {
-          const id = existingMap.get(`${r.colaborador_id}|${r.inicio}|${r.fim}|${r.periodo_aquisitivo}`);
-          if (!id) continue;
-          const { error } = await supabase.from("ferias").update(r).eq("id", id);
-          if (error) erros.push(error.message); else ok += 1;
+
+        const c = findColaborador(colabs, ref);
+        if (!c) {
+          erros.push(`Linha ${i + 2}: colaborador "${ref}" não encontrado`);
+          continue;
+        }
+
+        inserts.push({ line: i + 2, colaborador: c, periodo_aquisitivo: pa, inicio, fim });
+      }
+
+      // Primeiro, detectar duplicatas DENTRO DO ARQUIVO
+      const duplicatasNoArquivo = detectarDuplicatasArquivo(inserts);
+      if (duplicatasNoArquivo.length > 0) {
+        setDuplicatasArquivo(duplicatasNoArquivo);
+        setFeriasParaImportar(inserts);
+        setShowDuplicatasDialog(true);
+        toast.warning(`${duplicatasNoArquivo.length} colaborador(es) com férias duplicadas no arquivo`);
+        setBusy(false);
+        return;
+      }
+
+      // Validar se colaboradores já têm férias agendadas
+      for (const feria of inserts) {
+        try {
+          const resultado = await validarFerias({
+            gpid: feria.colaborador.gpid,
+            nome: feria.colaborador.nome,
+          });
+
+          if (resultado.existe && resultado.ferias.length > 0) {
+            conflitosEncontrados.push({
+              linha: feria.line,
+              colaborador: feria.colaborador,
+              periodo_aquisitivo: feria.periodo_aquisitivo,
+              inicio: feria.inicio,
+              fim: feria.fim,
+              feriasExistentes: resultado.ferias.map((f) => ({
+                inicio: f.inicio,
+                fim: f.fim,
+                status: f.status,
+              })),
+            });
+          }
+        } catch (err) {
+          console.error("[v0] Erro validando férias:", err);
         }
       }
-      toast.success(`${ok} férias importadas/atualizadas. ${erros.length} erros.`);
-      if (erros.length) {
-        console.warn("Importação férias — erros:", erros);
-        setErrorRows(erros);
-        setShowErrorDialog(true);
+
+      if (conflitosEncontrados.length > 0) {
+        setConflitos(conflitosEncontrados);
+        setFeriasParaImportar(inserts);
+        setLinhasParaPular(new Set());
+        setShowConflitoDialog(true);
+        toast.warning(`${conflitosEncontrados.length} colaborador(es) já tem férias agendadas`);
       } else {
-        setErrorRows([]);
-        setShowErrorDialog(false);
+        // Sem conflitos, importar direto
+        const recDedupSemConflito = Array.from(
+          new Map(inserts.map((r) => [`${r.colaborador.id}|${r.inicio}|${r.fim}|${r.periodo_aquisitivo}`, r]))
+            .values(),
+        );
+
+        let ok = 0;
+        for (const batch of chunk(recDedupSemConflito, 200)) {
+          const novos = batch.map((f) => ({
+            colaborador_id: f.colaborador.id,
+            gestor_id: f.colaborador.gestor_id ?? null,
+            inicio: f.inicio,
+            fim: f.fim,
+            periodo_aquisitivo: f.periodo_aquisitivo,
+            status: "Pendente",
+          }));
+
+          const { error } = await supabase.from("ferias").insert(novos);
+          if (error) {
+            erros.push(error.message);
+          } else {
+            ok += novos.length;
+          }
+        }
+
+        toast.success(`${ok} férias importadas. ${erros.length} erros.`);
+        if (erros.length) {
+          setErrorRows(erros);
+          setShowErrorDialog(true);
+        }
+        onDone();
       }
-      onDone();
-    } catch (e) { toast.error((e as Error).message); }
-    setBusy(false);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function togglePular(linha: number) {
+    const novo = new Set(linhasParaPular);
+    if (novo.has(linha)) {
+      novo.delete(linha);
+    } else {
+      novo.add(linha);
+    }
+    setLinhasParaPular(novo);
   }
 
   return (
     <>
       <input ref={ref} type="file" accept=".xlsx" hidden onChange={(e) => {
-        const f = e.target.files?.[0]; if (f) handle(f); e.target.value = "";
+        const f = e.target.files?.[0];
+        if (f) handle(f);
+        e.target.value = "";
       }} />
+
+      {/* Modal de Conflitos */}
+      <Dialog open={showConflitoDialog} onOpenChange={setShowConflitoDialog}>
+        <DialogContent className="max-w-2xl max-h-96">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              <DialogTitle>Férias Já Agendadas</DialogTitle>
+            </div>
+            <DialogDescription>
+              {conflitos.length} colaborador(es) já tem férias agendadas no sistema. Escolha se deseja continuar ou pular cada um.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 max-h-64 overflow-y-auto border rounded-md p-3">
+            {conflitos.map((conflito) => (
+              <div key={conflito.linha} className="border-l-4 border-amber-400 bg-amber-50 p-3 rounded">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <p className="font-semibold text-sm">
+                      {conflito.colaborador.nome} ({conflito.colaborador.gpid})
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Nova féria: {formatDateBr(conflito.inicio)} a {formatDateBr(conflito.fim)}
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={linhasParaPular.has(conflito.linha)}
+                      onChange={() => togglePular(conflito.linha)}
+                    />
+                    Pular
+                  </label>
+                </div>
+
+                <div className="text-xs space-y-1 bg-white p-2 rounded">
+                  <p className="font-medium text-muted-foreground">Férias existentes:</p>
+                  {conflito.feriasExistentes.map((f, idx) => (
+                    <div key={idx} className="text-xs">
+                      {formatDateBr(f.inicio)} a {formatDateBr(f.fim)} ({f.status})
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowConflitoDialog(false);
+                setConflitos([]);
+                setFeriasParaImportar([]);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={importarFeriasValidadas} disabled={busy}>
+              {busy ? "Importando..." : `Continuar (${feriasParaImportar.length - linhasParaPular.size})`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Duplicatas no Arquivo */}
+      <Dialog open={showDuplicatasDialog} onOpenChange={setShowDuplicatasDialog}>
+        <DialogContent className="max-w-2xl max-h-96">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              <DialogTitle>Duplicatas Detectadas no Arquivo</DialogTitle>
+            </div>
+            <DialogDescription>
+              O arquivo contém {duplicatasArquivo.length} colaborador(es) com múltiplas férias no mesmo período. Corrija o arquivo e tente novamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 max-h-64 overflow-y-auto border rounded p-3">
+            {duplicatasArquivo.map((dup, idx) => (
+              <div key={idx} className="border-l-4 border-destructive bg-red-50 p-3 rounded">
+                <p className="font-semibold text-sm">{dup.colaborador.nome}</p>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Período: {dup.periodo_aquisitivo} ({dup.ano}) • {dup.ferias.length} férias encontradas
+                </p>
+                <div className="space-y-1 bg-white p-2 rounded border text-xs">
+                  {dup.ferias.map((f, fIdx) => (
+                    <div key={fIdx} className="flex justify-between">
+                      <span className="text-muted-foreground">Linha {f.linha}:</span>
+                      <span>{formatDateBr(f.inicio)} até {formatDateBr(f.fim)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDuplicatasDialog(false);
+                setDuplicatasArquivo([]);
+                setFeriasParaImportar([]);
+              }}
+            >
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Erros */}
       <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>
         <DialogContent>
           <DialogHeader>
@@ -443,6 +732,7 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
       <Button variant="outline" size="sm" disabled={busy} onClick={() => ref.current?.click()}>
         <Upload className="h-4 w-4 mr-1" />{busy ? "Importando..." : "Importar XLSX"}
       </Button>

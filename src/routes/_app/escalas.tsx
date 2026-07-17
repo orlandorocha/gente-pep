@@ -180,6 +180,24 @@ function EscalasPage() {
     | "pendentes"
   >("alerta");
 
+  // Novos filtros avançados
+  const [gpidFilter, setGpidFilter] = useState("");
+  const [setorFilter, setSetorFilter] = useState("");
+  const [turnoFilter, setTurnoFilter] = useState("");
+  const [periodoFilter, setPeriodoFilter] = useState<"mes" | "7dias" | "30dias">("mes");
+  const [apenasComAlertas, setApenasComAlertas] = useState(false);
+
+  // Extrair setores e turnos únicos dos colaboradores
+  const setoresDisponiveis = useMemo(() => {
+    const setores = new Set(colaboradores.map((c) => c.setor).filter(Boolean));
+    return Array.from(setores).sort();
+  }, [colaboradores]);
+
+  const turnosDisponiveis = useMemo(() => {
+    const turnos = new Set(colaboradores.map((c) => c.turno).filter(Boolean));
+    return Array.from(turnos).sort();
+  }, [colaboradores]);
+
   const filteredColaboradores = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return colaboradores.filter((colaborador) => {
@@ -194,13 +212,30 @@ function EscalasPage() {
         .toLowerCase();
 
       const matchesText = text.includes(normalized);
+      const matchesGpid =
+        !gpidFilter.trim() || colaborador.matricula.includes(gpidFilter.trim());
+      const matchesSetor =
+        !setorFilter || colaborador.setor === setorFilter;
+      const matchesTurno =
+        !turnoFilter || colaborador.turno === turnoFilter;
       const matchesStatus =
         statusFilter === "all" ||
         statusMap.get(colaborador.id)?.alertNivel === statusFilter;
 
-      return matchesText && matchesStatus;
+      const temAlertas =
+        statusMap.get(colaborador.id)?.alertNivel !== "ok";
+      const matchesAlertas = !apenasComAlertas || temAlertas;
+
+      return (
+        matchesText &&
+        matchesGpid &&
+        matchesSetor &&
+        matchesTurno &&
+        matchesStatus &&
+        matchesAlertas
+      );
     });
-  }, [colaboradores, query, statusFilter, statusMap]);
+  }, [colaboradores, query, gpidFilter, setorFilter, turnoFilter, statusFilter, statusMap, apenasComAlertas]);
 
   const sortedColaboradores = useMemo(() => {
     return [...filteredColaboradores].sort((a, b) => {
@@ -696,6 +731,110 @@ function EscalasPage() {
                   <SelectItem value="pendentes">Pendências</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+        </Card>
+
+        {/* Filtros Avançados */}
+        <Card className="p-4">
+          <div className="space-y-3">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Filtros Avançados
+            </Label>
+            <div className="grid gap-3 md:grid-cols-5 lg:grid-cols-6">
+              <div>
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  GPID / Matrícula
+                </Label>
+                <Input
+                  placeholder="Filtrar GPID"
+                  value={gpidFilter}
+                  onChange={(e) => setGpidFilter(e.target.value)}
+                  className="mt-1 h-9 text-xs"
+                />
+              </div>
+              <div>
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Setor
+                </Label>
+                <Select value={setorFilter} onValueChange={setSetorFilter}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Todos os setores</SelectItem>
+                    {setoresDisponiveis.map((setor) => (
+                      <SelectItem key={setor} value={setor}>
+                        {setor}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Turno
+                </Label>
+                <Select value={turnoFilter} onValueChange={setTurnoFilter}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Todos os turnos</SelectItem>
+                    {turnosDisponiveis.map((turno) => (
+                      <SelectItem key={turno} value={turno}>
+                        {turno}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Período
+                </Label>
+                <Select value={periodoFilter} onValueChange={(value) => setPeriodoFilter(value as any)}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mes">Mês inteiro</SelectItem>
+                    <SelectItem value="7dias">Próx. 7 dias</SelectItem>
+                    <SelectItem value="30dias">Próx. 30 dias</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer h-9">
+                  <Checkbox
+                    checked={apenasComAlertas}
+                    onCheckedChange={(checked) => setApenasComAlertas(checked as boolean)}
+                  />
+                  <span className="text-[11px] uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                    Apenas alertas
+                  </span>
+                </label>
+              </div>
+              {(gpidFilter || setorFilter || turnoFilter || apenasComAlertas) && (
+                <div className="flex items-end">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setGpidFilter("");
+                      setSetorFilter("");
+                      setTurnoFilter("");
+                      setApenasComAlertas(false);
+                    }}
+                    className="text-xs h-9"
+                  >
+                    Limpar filtros
+                  </Button>
+                </div>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Exibindo <strong>{filteredColaboradores.length}</strong> de <strong>{colaboradores.length}</strong> colaboradores
             </div>
           </div>
         </Card>

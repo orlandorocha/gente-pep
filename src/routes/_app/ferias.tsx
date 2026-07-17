@@ -17,11 +17,12 @@ import { ColaboradorSelect } from "@/components/forms/ColaboradorSelect";
 import { RowActions } from "@/components/RowActions";
 import { useColaboradores, useTable } from "@/hooks/useData";
 import { supabase } from "@/integrations/custom-supabase/client";
-import { solicitarFerias } from "@/lib/ferias.functions";
+import { solicitarFerias, detectarFeriasDuplicadas, deletarFeriasDuplicadas, type GrupoFeriasDuplicadas } from "@/lib/ferias.functions";
 import { formatLocalDateISO } from "@/lib/utils";
 import { formatDateBr, formatDateRangeBr } from "@/lib/date";
 import { toast } from "sonner";
-import { Check, X, CalendarRange } from "lucide-react";
+import { Check, X, CalendarRange, AlertTriangle, Trash2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ExportFeriasButton, ImportFeriasButton } from "@/components/XlsxButtons";
 import { ImprimirFeriasButton } from "@/components/ImprimirFeriasButton";
 import { DataPagination, usePagination } from "@/components/DataPagination";
@@ -163,6 +164,31 @@ function FeriasPage() {
   const [areaFilter, setAreaFilter] = useState("all");
   const [turnoFilter, setTurnoFilter] = useState("all");
   const [grupoEmGozoAberto, setGrupoEmGozoAberto] = useState<string | null>(null);
+  const [duplicatas, setDuplicatas] = useState<GrupoFeriasDuplicadas[]>([]);
+  const [showDuplicatasModal, setShowDuplicatasModal] = useState(false);
+  const [selecionadasParaDelete, setSelecionadasParaDelete] = useState<Set<string>>(new Set());
+  const [deletandoDuplicatas, setDeletandoDuplicatas] = useState(false);
+  const detectarDuplicatas = useServerFn(detectarFeriasDuplicadas);
+  const deletarDuplicatas = useServerFn(deletarFeriasDuplicadas);
+
+  // Detectar férias duplicadas ao carregar
+  useEffect(() => {
+    (async () => {
+      try {
+        const resultado = await detectarDuplicatas();
+        setDuplicatas(resultado.grupos);
+        if (resultado.total > 0) {
+          toast.error(`Detectadas ${resultado.total} féria(s) duplicada(s)! Clique no aviso para corrigir.`, {
+            duration: 8000,
+          });
+        }
+      } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error("[v0] Erro detectarDuplicatas:", errorMsg);
+        // Silenciosamente falha - não mostra erro para não assustar
+      }
+    })();
+  }, [detectarDuplicatas]);
 
   // Auto-reagendamento ao detectar férias encerradas
   useEffect(() => {
@@ -287,6 +313,32 @@ function FeriasPage() {
 
   const { paged, page, setPage, pageSize, setPageSize, total, totalPages } = usePagination(filteredFerias, 10);
 
+  async function deletarSelecionadas() {
+    if (selecionadasParaDelete.size === 0) {
+      toast.error("Selecione pelo menos uma féria para deletar");
+      return;
+    }
+
+    setDeletandoDuplicatas(true);
+    try {
+      const resultado = await deletarDuplicatas({
+        feriaIds: Array.from(selecionadasParaDelete),
+      });
+      toast.success(`${resultado.deletadas} férias duplicadas removidas`);
+      setSelecionadasParaDelete(new Set());
+      setShowDuplicatasModal(false);
+      reload();
+      
+      // Re-detectar para atualizar lista
+      const novaDeteccao = await detectarDuplicatas();
+      setDuplicatas(novaDeteccao.grupos);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setDeletandoDuplicatas(false);
+    }
+  }
+
   async function decidir(id: string, acao: "aprovar" | "recusar") {
     try {
       const item = ferias.find((row) => row.id === id);
@@ -319,6 +371,17 @@ function FeriasPage() {
       <PageHeader title="Férias" description="Planejamento, aprovação e gozo"
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {duplicatas.length > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setShowDuplicatasModal(true)}
+                className="gap-2"
+              >
+                <AlertTriangle className="h-4 w-4" />
+                {duplicatas.reduce((sum, g) => sum + (g.ferias.length - 1), 0)} Duplicatas
+              </Button>
+            )}
             <ImportFeriasButton colabs={colabs as any} onDone={reload} />
             <ExportFeriasButton ferias={filteredFerias as any} colabs={colabs as any} area={areaFilter} turno={turnoFilter} />
             <ImprimirFeriasButton ferias={ferias as any} colabs={colabs as any} />
@@ -478,6 +541,94 @@ function FeriasPage() {
           <FeriasEditForm initial={editing} onSaved={() => { reload(); setEditing(null); close(); }} />
         )}
       </EditSheet>
+
+      <Dialog open={showDuplicatasModal} onOpenChange={setShowDuplicatasModal}>
+        <DialogContent className="max-w-4xl max-h-96">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              <DialogTitle>Férias Duplicadas Detectadas</DialogTitle>
+            </div>
+            <DialogDescription>
+              Selecione as férias que deseja deletar. Recomenda-se manter a féria com status "Aprovada", depois "Em gozo", depois "Concluída" e deletar as demais.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 max-h-64 overflow-y-auto pr-3">
+            {duplicatas.map((grupo) => (
+              <div key={`${grupo.colaborador_id}-${grupo.ano}-${grupo.periodo_aquisitivo}`} className="border-l-4 border-destructive bg-red-50 p-3 rounded">
+                <div className="mb-3">
+                  <p className="font-semibold text-sm">
+                    {grupo.colaborador_nome}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Período: {grupo.periodo_aquisitivo} ({grupo.ano}) • {grupo.ferias.length} férias encontradas
+                  </p>
+                </div>
+
+                <div className="space-y-2 bg-white p-2 rounded border">
+                  {grupo.ferias.map((feria) => (
+                    <label key={feria.id} className="flex items-start gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+                      <Checkbox
+                        checked={selecionadasParaDelete.has(feria.id)}
+                        onCheckedChange={(checked) => {
+                          const novo = new Set(selecionadasParaDelete);
+                          if (checked) {
+                            novo.add(feria.id);
+                          } else {
+                            novo.delete(feria.id);
+                          }
+                          setSelecionadasParaDelete(novo);
+                        }}
+                        className="mt-1"
+                      />
+                      <div className="flex-1 text-sm">
+                        <div>
+                          {formatDateBr(feria.inicio)} até {formatDateBr(feria.fim)}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Status: <Badge variant="outline" className="ml-1">{feria.status}</Badge>
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {duplicatas.length === 0 && (
+            <div className="py-6 text-center text-muted-foreground">
+              Nenhuma duplicata encontrada.
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-4 border-t">
+            <div className="flex-1 text-xs text-muted-foreground">
+              {selecionadasParaDelete.size} féria(s) selecionada(s) para deletar
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDuplicatasModal(false);
+                setSelecionadasParaDelete(new Set());
+              }}
+              disabled={deletandoDuplicatas}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={deletarSelecionadas}
+              disabled={deletandoDuplicatas || selecionadasParaDelete.size === 0}
+              className="gap-2"
+            >
+              <Trash2 className="h-4 w-4" />
+              {deletandoDuplicatas ? "Deletando..." : "Deletar Selecionadas"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
