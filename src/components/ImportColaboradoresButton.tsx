@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Download, Upload } from "lucide-react";
 import { toast } from "sonner";
-import { downloadXlsx, readXlsxRows } from "@/lib/xlsx-utils";
+import { downloadXlsx, readXlsxRows, processarComResiencia } from "@/lib/xlsx-utils";
 import { supabase } from "@/integrations/custom-supabase/client";
 import { CARGOS } from "@/data/cargos";
 import { AREAS } from "@/data/areas";
@@ -146,7 +146,6 @@ export function ImportColaboradoresButton({
 
   async function applyImport(rows: ImportRow[], baseErrors: string[], kept = 0) {
     const errors = [...baseErrors];
-    let ok = 0;
     let atualizados = 0;
     let inseridos = 0;
     const BATCH = 500;
@@ -177,26 +176,31 @@ export function ImportColaboradoresButton({
           if (existingGpids.has(row.gpid)) atualizados += 1;
           else inseridos += 1;
         }
-        ok += mergedBatch.length;
         continue;
       }
 
-      for (const row of mergedBatch) {
-        const existed = existingGpids.has(row.gpid);
-        const { error } = await supabase
-          .from("colaboradores")
-          .upsert(row, { onConflict: "gpid", ignoreDuplicates: false });
-
-        if (error) {
-          errors.push(`Lote ${i / BATCH + 1} / GPID ${row.gpid}: ${error.message}`);
-          continue;
+      // Se falhar o lote, processa cada registro individualmente com resiliência
+      const resultado = await processarComResiencia(
+        mergedBatch,
+        async (row) => {
+          const { error } = await supabase
+            .from("colaboradores")
+            .upsert(row, { onConflict: "gpid", ignoreDuplicates: false });
+          if (error) throw new Error(`GPID ${row.gpid}: ${error.message}`);
         }
+      );
 
-        if (existed) atualizados += 1;
+      for (const row of mergedBatch) {
+        if (existingGpids.has(row.gpid)) atualizados += 1;
         else inseridos += 1;
-        ok += 1;
+      }
+
+      if (resultado.erros.length) {
+        errors.push(...resultado.erros.map((e) => `Lote ${i / BATCH + 1}: ${e}`));
       }
     }
+
+    const ok = atualizados + inseridos;
 
     setDuplicateRows([]);
     setPendingRows([]);

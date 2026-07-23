@@ -17,6 +17,41 @@ export function readXlsxRows(file: File): Promise<Record<string, any>[]> {
   });
 }
 
+/**
+ * Processa items de importação com tratamento resiliente de erros.
+ * Continua processando mesmo com falhas em itens individuais.
+ * @param items Array de itens a processar
+ * @param processor Função assíncrona que processa cada item
+ * @param batchSize Tamanho do lote para processamento (padrão: 200)
+ * @returns Resultado com contagem de sucessos e erros
+ */
+export async function processarComResiencia<T>(
+  items: T[],
+  processor: (item: T) => Promise<void>,
+  batchSize: number = 200
+): Promise<{ ok: number; erros: string[]; total: number }> {
+  const erros: string[] = [];
+  let ok = 0;
+
+  // Processa em lotes para evitar sobrecarga
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    
+    // Processa cada item do lote individualmente para capturar erros isolados
+    for (const item of batch) {
+      try {
+        await processor(item);
+        ok += 1;
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        erros.push(msg);
+      }
+    }
+  }
+
+  return { ok, erros, total: items.length };
+}
+
 export function downloadXlsx(rows: Record<string, any>[], sheetName: string, fileName: string) {
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();

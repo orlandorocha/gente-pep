@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/custom-supabase/client";
-import { downloadXlsx, findColaborador, readXlsxRows, toISODate } from "@/lib/xlsx-utils";
+import { downloadXlsx, findColaborador, readXlsxRows, toISODate, processarComResiencia } from "@/lib/xlsx-utils";
 
 type AgendamentoTipo = "De bem com a vida" | "Aniversário" | "Hora Extra";
 type AgendamentoStatus = "Agendado" | "Realizado" | "Cancelado";
@@ -191,21 +191,23 @@ export function ImportAgendamentosButton({
         });
       }
 
-      let ok = 0;
-      for (const batch of chunk(inserts, 200)) {
-        const { error } = await supabase.from("agendamentos").insert(batch);
-        if (error) {
-          erros.push(error.message);
-          continue;
+      // Processa cada agendamento individualmente com tratamento resiliente de erros
+      const resultado = await processarComResiencia(
+        inserts,
+        async (agendamento) => {
+          const { error } = await supabase.from("agendamentos").insert(agendamento);
+          if (error) throw new Error(error.message);
         }
-        ok += batch.length;
-      }
+      );
 
-      if (ok) toast.success(`${ok} agendamentos importados. ${erros.length} erros.`);
-      else toast.error(`Nenhum agendamento importado. ${erros.length} erros.`);
-      if (erros.length) {
-        console.warn("Importação agendamentos — erros:", erros);
-        setErrorRows(erros);
+      const ok = resultado.ok;
+      const todosErros = [...erros, ...resultado.erros];
+
+      if (ok) toast.success(`${ok} agendamentos importados. ${todosErros.length} erros.`);
+      else toast.error(`Nenhum agendamento importado. ${todosErros.length} erros.`);
+      if (todosErros.length) {
+        console.warn("Importação agendamentos — erros:", todosErros);
+        setErrorRows(todosErros);
         setShowErrorDialog(true);
       } else {
         setErrorRows([]);

@@ -18,6 +18,8 @@ export const importarColaboradores = createServerFn({ method: "POST" })
   .inputValidator((d) => ColaboradorImportSchema.parse(d))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/custom-supabase/client.server");
+    const { processarComResiencia } = await import("@/lib/xlsx-utils");
+    
     const rows = Array.from(new Map(data.rows.map((r) => [r.gpid.trim(), {
       ...r,
       nome: r.nome.trim(),
@@ -26,6 +28,7 @@ export const importarColaboradores = createServerFn({ method: "POST" })
       cargo: r.cargo.trim(),
       area: r.area.trim(),
     }])).values());
+    
     const gpids = rows.map((r) => r.gpid);
     const { data: existentes, error: readError } = await supabaseAdmin
       .from("colaboradores")
@@ -34,42 +37,46 @@ export const importarColaboradores = createServerFn({ method: "POST" })
     if (readError) throw new Error(readError.message);
 
     const idByGpid = new Map((existentes ?? []).map((c) => [c.gpid, c.id]));
-    const errors: string[] = [];
     let inserted = 0;
     let updated = 0;
 
-    for (const row of rows) {
-      const id = idByGpid.get(row.gpid);
-      const query = id
-        ? supabaseAdmin.from("colaboradores").update(row).eq("id", id)
-        : supabaseAdmin.from("colaboradores").insert(row);
-      const { error } = await query;
-      if (!error) {
-        if (id) updated += 1;
-        else inserted += 1;
-        continue;
-      }
-
-      if (error.code === "23505" || error.message.toLowerCase().includes("duplicate")) {
-        const { data: existing, error: lookupError } = await supabaseAdmin
-          .from("colaboradores")
-          .select("id")
-          .eq("gpid", row.gpid)
-          .maybeSingle();
-        if (lookupError || !existing) {
-          errors.push(`${row.gpid}: ${lookupError?.message ?? error.message}`);
-          continue;
+    // Processa cada colaborador com tratamento resiliente de erros
+    const resultado = await processarComResiencia(
+      rows,
+      async (row) => {
+        const id = idByGpid.get(row.gpid);
+        const query = id
+          ? supabaseAdmin.from("colaboradores").update(row).eq("id", id)
+          : supabaseAdmin.from("colaboradores").insert(row);
+        
+        const { error } = await query;
+        if (!error) {
+          if (id) updated += 1;
+          else inserted += 1;
+          return;
         }
-        const { error: updateError } = await supabaseAdmin
-          .from("colaboradores")
-          .update(row)
-          .eq("id", existing.id);
-        if (updateError) errors.push(`${row.gpid}: ${updateError.message}`);
-        else updated += 1;
-      } else {
-        errors.push(`${row.gpid}: ${error.message}`);
-      }
-    }
 
-    return { attempted: rows.length, inserted, updated, errors };
+        // Trata erro de duplicata
+        if (error.code === "23505" || error.message.toLowerCase().includes("duplicate")) {
+          const { data: existing, error: lookupError } = await supabaseAdmin
+            .from("colaboradores")
+            .select("id")
+            .eq("gpid", row.gpid)
+            .maybeSingle();
+          if (lookupError || !existing) {
+            throw new Error(`${row.gpid}: ${lookupError?.message ?? error.message}`);
+          }
+          const { error: updateError } = await supabaseAdmin
+            .from("colaboradores")
+            .update(row)
+            .eq("id", existing.id);
+          if (updateError) throw new Error(`${row.gpid}: ${updateError.message}`);
+          else updated += 1;
+        } else {
+          throw new Error(`${row.gpid}: ${error.message}`);
+        }
+      }
+    );
+
+    return { attempted: rows.length, inserted, updated, errors: resultado.erros };
   });

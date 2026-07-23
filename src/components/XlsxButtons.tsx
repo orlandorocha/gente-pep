@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Upload, Download, Mail } from "lucide-react";
 import { toast } from "sonner";
-import { readXlsxRows, downloadXlsx, findColaborador, toISODate } from "@/lib/xlsx-utils";
+import { readXlsxRows, downloadXlsx, findColaborador, toISODate, processarComResiencia } from "@/lib/xlsx-utils";
 import { supabase } from "@/integrations/custom-supabase/client";
 import { useServerFn } from "@tanstack/react-start";
 import { enviarFaltasParaGestores } from "@/lib/email-faltas.functions";
@@ -103,29 +103,26 @@ function normalizeFaltaPeriodo(value: string) {
   return aliases[normalized] ?? value.trim();
 }
 
-async function upsertFaltasBatch(batch: FaltaImportRow[], erros: string[]) {
+async function upsertFaltasBatch(batch: FaltaImportRow[]): Promise<{ ok: number; erros: string[] }> {
   const records = batch.map((row) => row.record);
   const { error } = await supabase
     .from("faltas")
     .upsert(records, { onConflict: "colaborador_id,data,motivo", ignoreDuplicates: false });
 
-  if (!error) return batch.length;
+  if (!error) return { ok: batch.length, erros: [] };
 
-  let ok = 0;
-  for (const row of batch) {
-    const { error: rowError } = await supabase
-      .from("faltas")
-      .upsert(row.record, { onConflict: "colaborador_id,data,motivo", ignoreDuplicates: false });
-
-    if (rowError) {
-      erros.push(`Linha ${row.line}: ${rowError.message}`);
-      continue;
+  // Se falhar o lote, processa individualmente
+  const resultado = await processarComResiencia(
+    batch,
+    async (row) => {
+      const { error: rowError } = await supabase
+        .from("faltas")
+        .upsert(row.record, { onConflict: "colaborador_id,data,motivo", ignoreDuplicates: false });
+      if (rowError) throw new Error(`Linha ${row.line}: ${rowError.message}`);
     }
+  );
 
-    ok += 1;
-  }
-
-  return ok;
+  return { ok: resultado.ok, erros: resultado.erros };
 }
 
 /** Importa Faltas a partir de .xlsx (colunas: data, colaborador_id (nome ou GPID), motivo, periodo, observacao) */
@@ -155,14 +152,19 @@ export function ImportFaltasButton({ colabs, onDone }: { colabs: Colab[]; onDone
         });
       }
       const dedup = Array.from(new Map(inserts.map((r) => [`${r.record.colaborador_id}|${r.record.data}|${r.record.motivo}`, r])).values());
-      let ok = 0;
+      let totalOk = 0;
+      const todosErros: string[] = [];
+      
       for (const batch of chunk(dedup, 500)) {
-        ok += await upsertFaltasBatch(batch, erros);
+        const { ok, erros: batchErros } = await upsertFaltasBatch(batch);
+        totalOk += ok;
+        todosErros.push(...batchErros);
       }
-      toast.success(`${ok} faltas importadas/atualizadas. ${erros.length} erros.`);
-      if (erros.length) {
-        console.warn("Importação faltas — erros:", erros);
-        setErrorRows(erros);
+      
+      toast.success(`${totalOk} faltas importadas/atualizadas. ${todosErros.length} erros.`);
+      if (todosErros.length) {
+        console.warn("Importação faltas — erros:", todosErros);
+        setErrorRows(todosErros);
         setShowErrorDialog(true);
       } else {
         setErrorRows([]);
@@ -417,29 +419,25 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
         return;
       }
 
-      const inserts = aImportar.map((f) => ({
-        colaborador_id: f.colaborador.id,
-        gestor_id: f.colaborador.gestor_id ?? null,
-        inicio: f.inicio,
-        fim: f.fim,
-        periodo_aquisitivo: f.periodo_aquisitivo,
-        status: "Pendente",
-      }));
-
-      let ok = 0;
-      const erros: string[] = [];
-      for (const batch of chunk(inserts, 200)) {
-        const { error } = await supabase.from("ferias").insert(batch);
-        if (error) {
-          erros.push(`Lote: ${error.message}`);
-        } else {
-          ok += batch.length;
+      // Processa cada registro individualmente com tratamento de erro
+      const resultado = await processarComResiencia(
+        aImportar,
+        async (feria) => {
+          const { error } = await supabase.from("ferias").insert({
+            colaborador_id: feria.colaborador.id,
+            gestor_id: feria.colaborador.gestor_id ?? null,
+            inicio: feria.inicio,
+            fim: feria.fim,
+            periodo_aquisitivo: feria.periodo_aquisitivo,
+            status: "Pendente",
+          });
+          if (error) throw new Error(error.message);
         }
-      }
+      );
 
-      toast.success(`${ok} férias importadas. ${erros.length} erros.`);
-      if (erros.length) {
-        setErrorRows(erros);
+      toast.success(`${resultado.ok} férias importadas. ${resultado.erros.length} erros.`);
+      if (resultado.erros.length) {
+        setErrorRows(resultado.erros);
         setShowErrorDialog(true);
       }
       setShowConflitoDialog(false);
@@ -538,34 +536,31 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
         setShowConflitoDialog(true);
         toast.warning(`${conflitosEncontrados.length} colaborador(es) já tem férias agendadas`);
       } else {
-        // Sem conflitos, importar direto
+        // Sem conflitos, importar com resiliência (continua mesmo com erros)
         const recDedupSemConflito = Array.from(
           new Map(inserts.map((r) => [`${r.colaborador.id}|${r.inicio}|${r.fim}|${r.periodo_aquisitivo}`, r]))
             .values(),
         );
 
-        let ok = 0;
-        for (const batch of chunk(recDedupSemConflito, 200)) {
-          const novos = batch.map((f) => ({
-            colaborador_id: f.colaborador.id,
-            gestor_id: f.colaborador.gestor_id ?? null,
-            inicio: f.inicio,
-            fim: f.fim,
-            periodo_aquisitivo: f.periodo_aquisitivo,
-            status: "Pendente",
-          }));
-
-          const { error } = await supabase.from("ferias").insert(novos);
-          if (error) {
-            erros.push(error.message);
-          } else {
-            ok += novos.length;
+        // Processa cada registro individualmente com tratamento de erro
+        const resultado = await processarComResiencia(
+          recDedupSemConflito,
+          async (feria) => {
+            const { error } = await supabase.from("ferias").insert({
+              colaborador_id: feria.colaborador.id,
+              gestor_id: feria.colaborador.gestor_id ?? null,
+              inicio: feria.inicio,
+              fim: feria.fim,
+              periodo_aquisitivo: feria.periodo_aquisitivo,
+              status: "Pendente",
+            });
+            if (error) throw new Error(error.message);
           }
-        }
+        );
 
-        toast.success(`${ok} férias importadas. ${erros.length} erros.`);
-        if (erros.length) {
-          setErrorRows(erros);
+        toast.success(`${resultado.ok} férias importadas. ${resultado.erros.length} erros.`);
+        if (resultado.erros.length) {
+          setErrorRows(resultado.erros);
           setShowErrorDialog(true);
         }
         onDone();
