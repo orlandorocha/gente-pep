@@ -129,14 +129,14 @@ export function ImportAgendamentosButton({
     setBusy(true);
     try {
       const rows = await readXlsxRows(file);
-      const erros: string[] = [];
+      console.log("[v0] Total de linhas do Excel:", rows.length);
       const inserts: Array<{
         colaborador_id: string;
         tipo: AgendamentoTipo;
         titulo: string;
         data: string;
-        hora: string;
-        prioridade: Prioridade;
+        hora: string | null;
+        prioridade: AgendamentoPrioridade;
         status: AgendamentoStatus;
         observacao: string | null;
       }> = [];
@@ -190,6 +190,9 @@ export function ImportAgendamentosButton({
           observacao,
         });
       }
+      
+      console.log("[v0] Registros validados:", inserts.length);
+      console.log("[v0] Erros de validação:", erros.length);
 
       // Processa cada agendamento individualmente com tratamento resiliente de erros
       const resultado = await processarComResiencia(
@@ -202,6 +205,9 @@ export function ImportAgendamentosButton({
 
       const ok = resultado.ok;
       const todosErros = [...erros, ...resultado.erros];
+
+      console.log("[v0] Agendamentos importados:", ok);
+      console.log("[v0] Erros na importação:", todosErros.length);
 
       if (ok) toast.success(`${ok} agendamentos importados. ${todosErros.length} erros.`);
       else toast.error(`Nenhum agendamento importado. ${todosErros.length} erros.`);

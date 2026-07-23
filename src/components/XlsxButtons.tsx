@@ -136,6 +136,7 @@ export function ImportFaltasButton({ colabs, onDone }: { colabs: Colab[]; onDone
     setBusy(true);
     try {
       const rows = await readXlsxRows(file);
+      console.log("[v0] Total de linhas do Excel:", rows.length);
       const inserts: FaltaImportRow[] = []; const erros: string[] = [];
       for (const [i, r] of rows.entries()) {
         const data = toISODate(r.data ?? r.Data);
@@ -151,15 +152,21 @@ export function ImportFaltasButton({ colabs, onDone }: { colabs: Colab[]; onDone
           record: { colaborador_id: c.id, data, motivo, periodo, observacao },
         });
       }
-      const dedup = Array.from(new Map(inserts.map((r) => [`${r.record.colaborador_id}|${r.record.data}|${r.record.motivo}`, r])).values());
+      console.log("[v0] Registros validados (antes de dedup):", inserts.length);
+      console.log("[v0] Erros de validação:", erros.length);
+      
+      // NÃO faz deduplicação - deixa o Supabase com conflict resolution handle
       let totalOk = 0;
       const todosErros: string[] = [];
       
-      for (const batch of chunk(dedup, 500)) {
+      for (const batch of chunk(inserts, 500)) {
         const { ok, erros: batchErros } = await upsertFaltasBatch(batch);
         totalOk += ok;
         todosErros.push(...batchErros);
       }
+      
+      console.log("[v0] Registros importados:", totalOk);
+      console.log("[v0] Erros na importação:", todosErros.length);
       
       toast.success(`${totalOk} faltas importadas/atualizadas. ${todosErros.length} erros.`);
       if (todosErros.length) {
@@ -491,6 +498,10 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
         inserts.push({ line: i + 2, colaborador: c, periodo_aquisitivo: pa, inicio, fim });
       }
 
+      console.log("[v0] Total de linhas do Excel:", rows.length);
+      console.log("[v0] Registros validados (antes de conflitos):", inserts.length);
+      console.log("[v0] Erros de validação:", erros.length);
+
       // Primeiro, detectar duplicatas DENTRO DO ARQUIVO
       const duplicatasNoArquivo = detectarDuplicatasArquivo(inserts);
       if (duplicatasNoArquivo.length > 0) {
@@ -537,14 +548,12 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
         toast.warning(`${conflitosEncontrados.length} colaborador(es) já tem férias agendadas`);
       } else {
         // Sem conflitos, importar com resiliência (continua mesmo com erros)
-        const recDedupSemConflito = Array.from(
-          new Map(inserts.map((r) => [`${r.colaborador.id}|${r.inicio}|${r.fim}|${r.periodo_aquisitivo}`, r]))
-            .values(),
-        );
+        // NÃO faz deduplicação - deixa o Supabase com conflict resolution handle
+        console.log("[v0] Importando", inserts.length, 'férias sem conflitos');
 
         // Processa cada registro individualmente com tratamento de erro
         const resultado = await processarComResiencia(
-          recDedupSemConflito,
+          inserts,
           async (feria) => {
             const { error } = await supabase.from("ferias").insert({
               colaborador_id: feria.colaborador.id,
@@ -558,6 +567,7 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
           }
         );
 
+        console.log("[v0] Férias importadas:", resultado.ok, ', Erros:', resultado.erros.length);
         toast.success(`${resultado.ok} férias importadas. ${resultado.erros.length} erros.`);
         if (resultado.erros.length) {
           setErrorRows(resultado.erros);
