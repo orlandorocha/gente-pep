@@ -11,7 +11,7 @@ import {
 import { AlertTriangle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/custom-supabase/client";
+import { deleteAllRecords } from "@/lib/admin-delete.functions";
 
 interface AdminDeleteButtonProps {
   tableName: string;
@@ -44,25 +44,28 @@ export function AdminDeleteButton({
       return;
     }
 
+    if (!user?.email) {
+      toast.error("Usuário não autenticado");
+      return;
+    }
+
     setLoading(true);
     try {
-      const { error } = await supabase.from(tableName).delete().neq("id", "");
+      const result = await deleteAllRecords({
+        tableName: tableName as any,
+        adminEmail: user.email,
+      });
 
-      if (error) {
-        console.error("[v0] Erro ao deletar registros:", error);
-        toast.error(`Erro ao deletar registros: ${error.message}`);
-        return;
-      }
-
-      toast.success(`Todos os registros de "${tableName}" foram deletados!`);
+      toast.success(`${result.deletedCount} registros de "${tableName}" foram deletados!`);
       setOpen(false);
       setConfirmText("");
       
       // Recarregar a página para refletir as mudanças
       window.location.reload();
     } catch (e) {
-      console.error("[v0] Erro inesperado:", e);
-      toast.error("Erro inesperado ao deletar registros");
+      const errorMsg = e instanceof Error ? e.message : "Erro inesperado";
+      console.error("[v0] Erro ao deletar registros:", errorMsg);
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }
