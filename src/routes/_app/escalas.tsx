@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PageHeader } from "@/components/PageHeader";
+import { AdminDeleteButton } from "@/components/AdminDeleteButton";
 import {
   Dialog,
   DialogClose,
@@ -613,9 +614,10 @@ function EscalasPage() {
         <PageHeader
           title="Monitor de Jornada Contínua"
           description="Controle de escalas com validação de dias consecutivos, domingos e folgas compensatórias."
-          actions={
-            <div className="flex flex-wrap items-center gap-2">
-              <Select value={String(mes)} onValueChange={(value) => setMes(Number(value))}>
+  actions={
+  <div className="flex flex-wrap items-center gap-2">
+  <AdminDeleteButton tableName="escalas" label="Deletar Todos" description="Todas as escalas serão removidas permanentemente" />
+  <Select value={String(mes)} onValueChange={(value) => setMes(Number(value))}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue />
                 </SelectTrigger>

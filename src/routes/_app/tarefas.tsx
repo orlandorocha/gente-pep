@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
+import { AdminDeleteButton } from "@/components/AdminDeleteButton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,9 +34,14 @@ function TarefasPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Tarefas" description="Pendências operacionais do time"
-        actions={<FormSheet triggerLabel="Nova tarefa" title="Nova tarefa">
-          {(close) => <TarefaForm colabs={colabs} onSaved={() => { reload(); close(); }} />}
-        </FormSheet>} />
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <AdminDeleteButton tableName="tarefas" label="Deletar Todos" description="Todas as tarefas serão removidas permanentemente" />
+            <FormSheet triggerLabel="Nova tarefa" title="Nova tarefa">
+              {(close) => <TarefaForm colabs={colabs} onSaved={() => { reload(); close(); }} />}
+            </FormSheet>
+          </div>
+        } />
       <div className="grid gap-4 md:grid-cols-3">
         {COLUNAS.map((col) => {
           const items = tarefas.filter((t) => t.status === col);

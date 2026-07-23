@@ -18,6 +18,7 @@ import { supabase } from "@/integrations/custom-supabase/client";
 import { MOTIVOS } from "@/data/motivos";
 import { toast } from "sonner";
 import { ImportFaltasButton, ExportFaltasButton, EmailGestoresButton } from "@/components/XlsxButtons";
+import { AdminDeleteButton } from "@/components/AdminDeleteButton";
 import { DataPagination, usePagination } from "@/components/DataPagination";
 import { formatDateBr } from "@/lib/date";
 
@@ -95,6 +96,7 @@ function FaltasPage() {
         description={`${faltas.length} ocorrências registradas`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <AdminDeleteButton tableName="faltas" label="Deletar Todos" description="Todos os registros de faltas serão removidos permanentemente" />
             <ImportFaltasButton colabs={colabs as any} onDone={reload} />
             <ExportFaltasButton faltas={filteredFaltas as any} colabs={colabs as any} />
             <EmailGestoresButton />

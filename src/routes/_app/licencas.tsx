@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
+import { AdminDeleteButton } from "@/components/AdminDeleteButton";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -64,10 +65,15 @@ function LicencasPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Licenças" description="Afastamentos por tipo e período"
-        actions={<FormSheet triggerLabel="Nova licença" title="Nova licença">
+  <PageHeader title="Licenças" description="Afastamentos por tipo e período"
+  actions={
+    <div className="flex flex-wrap items-center gap-2">
+      <AdminDeleteButton tableName="licencas" label="Deletar Todos" description="Todas as licenças serão removidas permanentemente" />
+      <FormSheet triggerLabel="Nova licença" title="Nova licença">
           {(close) => <LicencaForm colabs={colabs} onSaved={() => { reload(); close(); }} />}
-        </FormSheet>} />
+        </FormSheet>
+    </div>
+  } />
       <Card className="p-4">
         <div className="mb-4 flex flex-wrap items-end gap-3">
           <div className="min-w-[260px] flex-1 space-y-2">

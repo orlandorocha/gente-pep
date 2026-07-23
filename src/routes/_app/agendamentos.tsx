@@ -15,6 +15,7 @@ import { FormSheet, EditSheet } from "@/components/forms/FormSheet";
 import { ColaboradorSelect } from "@/components/forms/ColaboradorSelect";
 import { RowActions } from "@/components/RowActions";
 import { ExportAgendamentosButton, ImportAgendamentosButton } from "@/components/AgendamentosXlsxButtons";
+import { AdminDeleteButton } from "@/components/AdminDeleteButton";
 import { useColaboradores, useTable } from "@/hooks/useData";
 import { supabase } from "@/integrations/custom-supabase/client";
 import { sincronizarFaltasDoDia } from "@/lib/sync.functions";
@@ -73,9 +74,10 @@ function AgendamentosPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Agendamentos" description="Compromissos e acompanhamentos"
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <ImportAgendamentosButton colabs={colabs as any} agendamentos={ags as any} onDone={reload} />
+  actions={
+  <div className="flex flex-wrap items-center gap-2">
+  <AdminDeleteButton tableName="agendamentos" label="Deletar Todos" description="Todos os agendamentos serão removidos permanentemente" />
+  <ImportAgendamentosButton colabs={colabs as any} agendamentos={ags as any} onDone={reload} />
             <ExportAgendamentosButton agendamentos={filteredAgs as any} colabs={colabs as any} tipo={tipoFilter} />
             <FormSheet triggerLabel="Novo agendamento" title="Novo agendamento">
               {(close) => <AgendamentoForm colabs={colabs} onSaved={() => { reload(); close(); }} />}

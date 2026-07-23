@@ -25,6 +25,7 @@ import { Check, X, CalendarRange, AlertTriangle, Trash2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ExportFeriasButton, ImportFeriasButton } from "@/components/XlsxButtons";
 import { ImprimirFeriasButton } from "@/components/ImprimirFeriasButton";
+import { AdminDeleteButton } from "@/components/AdminDeleteButton";
 import { DataPagination, usePagination } from "@/components/DataPagination";
 
 export const Route = createFileRoute("/_app/ferias")({ component: FeriasPage });
@@ -382,9 +383,10 @@ function FeriasPage() {
                 {duplicatas.reduce((sum, g) => sum + (g.ferias.length - 1), 0)} Duplicatas
               </Button>
             )}
-            <ImportFeriasButton colabs={colabs as any} onDone={reload} />
-            <ExportFeriasButton ferias={filteredFerias as any} colabs={colabs as any} area={areaFilter} turno={turnoFilter} />
-            <ImprimirFeriasButton ferias={ferias as any} colabs={colabs as any} />
+<AdminDeleteButton tableName="ferias" label="Deletar Todos" description="Todos os registros de férias serão removidos permanentemente" />
+<ImportFeriasButton colabs={colabs as any} onDone={reload} />
+<ExportFeriasButton ferias={filteredFerias as any} colabs={colabs as any} area={areaFilter} turno={turnoFilter} />
+<ImprimirFeriasButton ferias={ferias as any} colabs={colabs as any} />
             <FormSheet triggerLabel="Solicitar férias" title="Solicitar férias">
               {(close) => (
                 <FeriasForm

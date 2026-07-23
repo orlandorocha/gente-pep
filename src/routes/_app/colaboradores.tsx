@@ -22,6 +22,7 @@ import { RowActions } from "@/components/RowActions";
 import { EditSheet } from "@/components/forms/FormSheet";
 import { GestoresModal } from "@/components/GestoresModal";
 import { ExportColaboradoresButton, ImportColaboradoresButton } from "@/components/ImportColaboradoresButton";
+import { AdminDeleteButton } from "@/components/AdminDeleteButton";
 import { DataPagination, usePagination } from "@/components/DataPagination";
 import { toast } from "sonner";
 
@@ -74,11 +75,12 @@ function ColaboradoresPage() {
       <PageHeader
         title="Colaboradores"
         description={`${colaboradores.length} cadastrados · ${colaboradores.filter(c=>c.status==="Ativo").length} ativos`}
-        actions={
-          <div className="flex items-center gap-2">
-            <ImportColaboradoresButton gestores={gestores} onDone={reload} />
-            <ExportColaboradoresButton colaboradores={list} area={areaFilter} turno={turnoFilter} />
-            <GestoresModal
+  actions={
+  <div className="flex items-center gap-2">
+  <AdminDeleteButton tableName="colaboradores" label="Deletar Todos" description="Todos os colaboradores serão removidos permanentemente" />
+  <ImportColaboradoresButton gestores={gestores} onDone={reload} />
+  <ExportColaboradoresButton colaboradores={list} area={areaFilter} turno={turnoFilter} />
+  <GestoresModal
               gestores={gestores}
               onChanged={reloadGestores}
               onColaboradoresChanged={reload}
