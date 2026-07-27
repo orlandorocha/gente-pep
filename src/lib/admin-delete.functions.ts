@@ -1,7 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
-import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/integrations/supabase/types";
 
 const VALID_TABLES = [
   "ferias",
@@ -18,37 +15,6 @@ type ValidTableName = (typeof VALID_TABLES)[number];
 interface DeleteAllInput {
   tableName: string;
   adminEmail: string;
-}
-
-// Helper para criar cliente Supabase autenticado no servidor
-async function getAuthenticatedClient() {
-  const request = getRequest();
-  const authHeader = request?.headers.get("authorization");
-  const token = authHeader?.replace("Bearer ", "");
-
-  if (!token) {
-    throw new Error("Autenticação necessária");
-  }
-
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
-
-  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-    throw new Error("Variáveis Supabase não configuradas");
-  }
-
-  return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-    global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
-    auth: {
-      storage: undefined,
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
 }
 
 export const deleteAllRecords = createServerFn({ method: "POST" }).handler(
@@ -69,11 +35,11 @@ export const deleteAllRecords = createServerFn({ method: "POST" }).handler(
       throw new Error("Acesso negado: apenas admin pode deletar");
     }
 
-    // Obter cliente autenticado com o token da requisição
-    const supabase = await getAuthenticatedClient();
+    // Usar supabaseAdmin que já tem autenticação de servidor
+    const { supabaseAdmin } = await import("@/integrations/custom-supabase/client.server");
 
     // Deletar todos os registros da tabela
-    const { error, count } = await supabase
+    const { error, count } = await supabaseAdmin
       .from(input.tableName as ValidTableName)
       .delete()
       .neq("id", "");

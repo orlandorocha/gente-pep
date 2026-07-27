@@ -1,38 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
-import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
-
-// Helper para criar cliente Supabase autenticado no servidor
-async function getAuthenticatedClient() {
-  const request = getRequest();
-  const authHeader = request?.headers.get("authorization");
-  const token = authHeader?.replace("Bearer ", "");
-
-  if (!token) {
-    throw new Error("Autenticação necessária");
-  }
-
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
-
-  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-    throw new Error("Variáveis Supabase não configuradas");
-  }
-
-  return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-    global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
-    auth: {
-      storage: undefined,
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
-}
 
 export interface FeriaAVerificar {
   colaborador_id: string;
@@ -70,13 +37,13 @@ export const verificarFeriasDuplicadas = createServerFn({ method: "POST" }).hand
     }
 
     try {
-      const supabase = await getAuthenticatedClient();
+      const { supabaseAdmin } = await import("@/integrations/custom-supabase/client.server");
 
       const resultados: VerificacaoDuplicatas[] = [];
 
       // Para cada féria, verificar se existe uma igual na base
       for (const feria of ferias) {
-        const { data: existentes, error } = await supabase
+        const { data: existentes, error } = await supabaseAdmin
           .from("ferias")
           .select("id, status, inicio, fim, periodo_aquisitivo")
           .eq("colaborador_id", feria.colaborador_id)
