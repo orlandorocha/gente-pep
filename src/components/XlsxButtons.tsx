@@ -12,6 +12,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { enviarFaltasParaGestores } from "@/lib/email-faltas.functions";
 import { formatDateBr } from "@/lib/date";
 import { validarFeriasExistente } from "@/lib/ferias.functions";
+import { verificarFeriasDuplicadas } from "@/lib/check-duplicates.functions";
 import { AlertTriangle } from "lucide-react";
 
 type Colab = { id: string; nome: string; gpid: string; area: string; turno: string; gestor_id?: string | null };
@@ -378,6 +379,7 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
   const [duplicatasArquivo, setDuplicatasArquivo] = useState<FeriasDuplicataArquivo[]>([]);
   const [showDuplicatasDialog, setShowDuplicatasDialog] = useState(false);
   const validarFerias = useServerFn(validarFeriasExistente);
+  const verificarDuplicatas = useServerFn(verificarFeriasDuplicadas);
 
   function detectarDuplicatasArquivo(ferias: FeriasImportRow[]): FeriasDuplicataArquivo[] {
     // Agrupa por colaborador + periodo + ano
@@ -503,39 +505,50 @@ export function ImportFeriasButton({ colabs, onDone }: { colabs: Colab[]; onDone
         return;
       }
 
-      // Validar se colaboradores já têm férias agendadas
-      for (const feria of inserts) {
-        try {
-          const resultado = await validarFerias({
-            gpid: feria.colaborador.gpid,
-            nome: feria.colaborador.nome,
-          });
+      // Validar se já existem férias IGUAIS (mesmo colaborador + mesmas datas)
+      let feriasComDuplicata = [];
+      try {
+        // Busca no banco quais férias já existem com as mesmas datas
+        const feriasParaVerificar = inserts.map((f) => ({
+          colaborador_id: f.colaborador.id,
+          inicio: f.inicio,
+          fim: f.fim,
+          periodo_aquisitivo: f.periodo_aquisitivo,
+        }));
 
-          if (resultado.existe && resultado.ferias.length > 0) {
-            conflitosEncontrados.push({
-              linha: feria.line,
-              colaborador: feria.colaborador,
-              periodo_aquisitivo: feria.periodo_aquisitivo,
-              inicio: feria.inicio,
-              fim: feria.fim,
-              feriasExistentes: resultado.ferias.map((f) => ({
-                inicio: f.inicio,
-                fim: f.fim,
-                status: f.status,
-              })),
-            });
-          }
-        } catch (err) {
-          console.error("[v0] Erro validando férias:", err);
-        }
+        const resultadoVerificacao = await verificarDuplicatas(feriasParaVerificar);
+
+        // Filtrar apenas as que têm duplicata
+        feriasComDuplicata = inserts
+          .map((feria, idx) => ({
+            feria,
+            verificacao: resultadoVerificacao[idx],
+            line: feria.line,
+          }))
+          .filter((item) => item.verificacao.temDuplicata)
+          .map((item) => ({
+            linha: item.line,
+            colaborador: item.feria.colaborador,
+            periodo_aquisitivo: item.feria.periodo_aquisitivo,
+            inicio: item.feria.inicio,
+            fim: item.feria.fim,
+            feriasExistentes: item.verificacao.duplicatas.map((f) => ({
+              inicio: f.inicio,
+              fim: f.fim,
+              status: f.status,
+            })),
+          }));
+      } catch (err) {
+        console.error("[v0] Erro ao verificar duplicatas:", err);
+        // Se falhar verificação, continua mesmo assim
       }
 
-      if (conflitosEncontrados.length > 0) {
-        setConflitos(conflitosEncontrados);
+      if (feriasComDuplicata.length > 0) {
+        setConflitos(feriasComDuplicata);
         setFeriasParaImportar(inserts);
         setLinhasParaPular(new Set());
         setShowConflitoDialog(true);
-        toast.warning(`${conflitosEncontrados.length} colaborador(es) já tem férias agendadas`);
+        toast.warning(`${feriasComDuplicata.length} férias já existem com as mesmas datas`);
       } else {
         // Sem conflitos, importar com resiliência (continua mesmo com erros)
         // NÃO faz deduplicação - deixa o Supabase com conflict resolution handle
