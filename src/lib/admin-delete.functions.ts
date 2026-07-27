@@ -1,21 +1,24 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 
-const DeleteAllSchema = z.object({
-  tableName: z.enum([
-    "ferias",
-    "faltas",
-    "colaboradores",
-    "agendamentos",
-    "escalas",
-    "licencas",
-    "tarefas",
-  ]),
-  adminEmail: z.string().email(),
-});
+const VALID_TABLES = [
+  "ferias",
+  "faltas",
+  "colaboradores",
+  "agendamentos",
+  "escalas",
+  "licencas",
+  "tarefas",
+] as const;
+
+type ValidTableName = (typeof VALID_TABLES)[number];
+
+interface DeleteAllInput {
+  tableName: string;
+  adminEmail: string;
+}
 
 // Helper para criar cliente Supabase autenticado no servidor
 async function getAuthenticatedClient() {
@@ -48,12 +51,21 @@ async function getAuthenticatedClient() {
   });
 }
 
-export const deleteAllRecords = createServerFn({ method: "POST" })
-  .inputValidator((d) => DeleteAllSchema.parse(d))
-  .handler(async ({ data }) => {
+export const deleteAllRecords = createServerFn({ method: "POST" }).handler(
+  async (input: DeleteAllInput) => {
+    // Validar tableName
+    if (!input?.tableName || !VALID_TABLES.includes(input.tableName as ValidTableName)) {
+      throw new Error(`Tabela inválida: ${input?.tableName}`);
+    }
+
+    // Validar email do admin
+    if (!input?.adminEmail || typeof input.adminEmail !== "string") {
+      throw new Error("Email do admin não fornecido");
+    }
+
     // Verificar se é admin
     const adminEmail = import.meta.env.VITE_ADMIN_ACCESS_EMAIL;
-    if (data.adminEmail !== adminEmail) {
+    if (input.adminEmail !== adminEmail) {
       throw new Error("Acesso negado: apenas admin pode deletar");
     }
 
@@ -62,14 +74,15 @@ export const deleteAllRecords = createServerFn({ method: "POST" })
 
     // Deletar todos os registros da tabela
     const { error, count } = await supabase
-      .from(data.tableName)
+      .from(input.tableName as ValidTableName)
       .delete()
       .neq("id", "");
 
     if (error) {
-      console.error(`[v0] Erro ao deletar ${data.tableName}:`, error);
+      console.error(`[v0] Erro ao deletar ${input.tableName}:`, error);
       throw new Error(`Erro ao deletar registros: ${error.message}`);
     }
 
     return { success: true, deletedCount: count || 0 };
-  });
+  }
+);

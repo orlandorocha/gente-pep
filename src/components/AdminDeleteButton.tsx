@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,6 +35,9 @@ export function AdminDeleteButton({
   const adminEmail = import.meta.env.VITE_ADMIN_ACCESS_EMAIL;
   const isAdmin = user?.email === adminEmail;
 
+  // Envolver a função server com useServerFn
+  const deleteRecords = useServerFn(deleteAllRecords);
+
   if (!isAdmin) {
     return null;
   }
@@ -51,7 +55,7 @@ export function AdminDeleteButton({
 
     setLoading(true);
     try {
-      const result = await deleteAllRecords({
+      const result = await deleteRecords({
         tableName: tableName as any,
         adminEmail: user.email,
       });
@@ -63,7 +67,7 @@ export function AdminDeleteButton({
       // Recarregar a página para refletir as mudanças
       window.location.reload();
     } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : "Erro inesperado";
+      const errorMsg = e instanceof Error ? e.message : String(e);
       console.error("[v0] Erro ao deletar registros:", errorMsg);
       toast.error(errorMsg);
     } finally {
